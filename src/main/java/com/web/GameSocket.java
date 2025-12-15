@@ -51,6 +51,9 @@ public class GameSocket {
         LOG.info("Connessione chiusa: " + connection.id());
     }
 
+    @Inject
+    io.vertx.core.Vertx vertx;
+
     @OnTextMessage
     public void onMessage(WebSocketConnection connection, String message) {
         // Protocollo semplificato:
@@ -68,16 +71,30 @@ public class GameSocket {
                 String username = parts[2];
                 double amount = Double.parseDouble(parts[3]);
 
-                bettingService.placeBet(userId, username, amount);
-                connection.sendTextAndAwait("BET_OK:" + amount);
-                broadcast("BET_ANNOUNCEMENT:" + username + ":" + amount);
+                vertx.executeBlocking(() -> {
+                    bettingService.placeBet(userId, username, amount);
+                    return null;
+                }).onSuccess(res -> {
+                    connection.sendTextAndAwait("BET_OK:" + amount);
+                    broadcast("BET_ANNOUNCEMENT:" + username + ":" + amount);
+                }).onFailure(err -> {
+                    LOG.error("Errore placeBet", err);
+                    connection.sendTextAndAwait("ERROR:" + err.getMessage());
+                });
 
             } else if (message.startsWith("CASHOUT:")) {
                 String[] parts = message.split(":");
                 String userId = parts[1];
 
-                bettingService.cashOut(userId);
-                connection.sendTextAndAwait("CASHOUT_OK");
+                vertx.executeBlocking(() -> {
+                    bettingService.cashOut(userId);
+                    return null;
+                }).onSuccess(res -> {
+                    connection.sendTextAndAwait("CASHOUT_OK");
+                }).onFailure(err -> {
+                    LOG.error("Errore cashOut", err);
+                    connection.sendTextAndAwait("ERROR:" + err.getMessage());
+                });
             }
         } catch (Exception e) {
             LOG.error("Errore gestione messaggio: " + message, e);

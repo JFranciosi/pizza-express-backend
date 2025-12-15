@@ -3,8 +3,6 @@ package com.service;
 import com.model.Game;
 import com.model.GameState;
 import com.web.GameSocket;
-import io.quarkus.runtime.Startup;
-import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -38,8 +36,13 @@ public class GameEngineService {
     @Inject
     io.vertx.core.Vertx vertx;
 
+    private final io.quarkus.redis.datasource.hash.HashCommands<String, String, String> hashCommands;
+    private final io.quarkus.redis.datasource.list.ListCommands<String, String> listCommands;
+
     @Inject
-    public GameEngineService() {
+    public GameEngineService(io.quarkus.redis.datasource.RedisDataSource ds) {
+        this.hashCommands = ds.hash(String.class);
+        this.listCommands = ds.list(String.class);
     }
 
     @io.quarkus.runtime.Startup
@@ -60,6 +63,7 @@ public class GameEngineService {
         currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
 
         bettingService.resetBetsForNewRound();
+        saveGameToRedis();
 
         LOG.info("Nuovo round creato: " + currentGame.getId() + " - Crash Point: " + currentGame.getCrashPoint());
         gameSocket.broadcast("STATE:WAITING");
@@ -99,6 +103,7 @@ public class GameEngineService {
         currentGame.setStatus(GameState.FLYING);
         roundStartTime = System.currentTimeMillis();
         running.set(true);
+        saveGameToRedis();
         LOG.info("Game Started! VESPA IN VOLO 🛵💨");
 
         gameSocket.broadcast("STATE:RUNNING");
@@ -118,7 +123,10 @@ public class GameEngineService {
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
-            // Ottimizzazione: Manda tick solo se cambiato significativamente o ogni tot
+            // Non salviamo su Redis ad ogni tick per evitare overhead eccessivo,
+            // ma se serve real-time per chi entra dopo, si può decommentare:
+            // saveGameToRedis();
+
             gameSocket.broadcast("TICK:" + currentMultiplier);
         }
     }
@@ -129,8 +137,41 @@ public class GameEngineService {
         running.set(false);
         roundStartTime = System.currentTimeMillis(); // Reset timer per restart
 
+        saveGameToRedis();
+        saveToHistory(finalMultiplier);
+
         LOG.info("CRASHED at " + finalMultiplier + "x 💥");
         gameSocket.broadcast("CRASH:" + finalMultiplier);
+    }
+
+    private void saveGameToRedis() {
+        vertx.executeBlocking(() -> {
+            try {
+                hashCommands.hset("game:current", java.util.Map.of(
+                        "id", currentGame.getId(),
+                        "status", currentGame.getStatus().name(),
+                        "multiplier", String.valueOf(currentGame.getMultiplier()),
+                        "startTime", String.valueOf(currentGame.getStartTime()),
+                        "crashPoint", String.valueOf(currentGame.getCrashPoint())));
+                return null;
+            } catch (Exception e) {
+                LOG.error("Errore salvataggio game su Redis", e);
+                throw e;
+            }
+        });
+    }
+
+    private void saveToHistory(double crashPoint) {
+        vertx.executeBlocking(() -> {
+            try {
+                listCommands.lpush("game:history", String.valueOf(crashPoint));
+                listCommands.ltrim("game:history", 0, 49); // Tieni solo ultimi 50
+                return null;
+            } catch (Exception e) {
+                LOG.error("Errore salvataggio history su Redis", e);
+                throw e;
+            }
+        });
     }
 
     private double generateCrashPoint() {
