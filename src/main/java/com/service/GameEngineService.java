@@ -2,6 +2,8 @@ package com.service;
 
 import com.model.Game;
 import com.model.GameState;
+import com.web.GameSocket;
+import io.quarkus.runtime.Startup;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,9 +30,25 @@ public class GameEngineService {
     private long roundStartTime;
 
     @Inject
+    GameSocket gameSocket;
+
+    @Inject
+    BettingService bettingService;
+
+    @Inject
+    io.vertx.core.Vertx vertx;
+
+    @Inject
     public GameEngineService() {
-        // Inizializza il primo gioco
-        startNewRound();
+    }
+
+    @io.quarkus.runtime.Startup
+    void init() {
+        if (currentGame == null) {
+            startNewRound();
+            // Avvia il loop di gioco ogni 100ms
+            vertx.setPeriodic(100, id -> gameLoop());
+        }
     }
 
     private void startNewRound() {
@@ -38,14 +56,17 @@ public class GameEngineService {
         currentGame.setId(UUID.randomUUID().toString());
         currentGame.setStatus(GameState.WAITING);
         currentGame.setMultiplier(1.00);
-        // TODO: Generare CrashPoint cryptographically fair
         currentGame.setCrashPoint(generateCrashPoint());
         currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
 
+        bettingService.resetBetsForNewRound();
+
         LOG.info("Nuovo round creato: " + currentGame.getId() + " - Crash Point: " + currentGame.getCrashPoint());
+        gameSocket.broadcast("STATE:WAITING");
+        gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
     }
 
-    @Scheduled(every = "0.1s") // Game Loop: 10 tick al secondo
+    // Rimosso @Scheduled, ora chiamato da Vert.x
     void gameLoop() {
         if (currentGame == null)
             return;
@@ -56,6 +77,8 @@ public class GameEngineService {
             case WAITING:
                 if (now >= currentGame.getStartTime()) {
                     startGame();
+                } else {
+                    // Opzionale: broadcast countdown
                 }
                 break;
 
@@ -78,27 +101,25 @@ public class GameEngineService {
         running.set(true);
         LOG.info("Game Started! VESPA IN VOLO 🛵💨");
 
-        // TODO: Notifica WebSocket GAME_STARTED
+        gameSocket.broadcast("STATE:RUNNING");
+        gameSocket.broadcast("TAKEOFF");
     }
 
     private void updateMultiplier(long now) {
         long timeElapsed = now - roundStartTime;
 
         // Formula esponenziale: E^(k * t)
-        // t in millisecondi
         double rawMultiplier = Math.exp(GROWTH_RATE * timeElapsed);
 
-        // Arrotonda a 2 decimali
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
         double currentMultiplier = bd.doubleValue();
 
-        // Controllo CRASH
         if (currentMultiplier >= currentGame.getCrashPoint()) {
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
-            // LOG.debug("Multiplier: " + currentMultiplier + "x");
-            // TODO: Notifica WebSocket TICK
+            // Ottimizzazione: Manda tick solo se cambiato significativamente o ogni tot
+            gameSocket.broadcast("TICK:" + currentMultiplier);
         }
     }
 
@@ -106,31 +127,23 @@ public class GameEngineService {
         currentGame.setStatus(GameState.CRASHED);
         currentGame.setMultiplier(finalMultiplier);
         running.set(false);
-        roundStartTime = System.currentTimeMillis(); // Riutilizziamo per il timer di restart
+        roundStartTime = System.currentTimeMillis(); // Reset timer per restart
 
         LOG.info("CRASHED at " + finalMultiplier + "x 💥");
-        // TODO: Notifica WebSocket CRASH
-        // TODO: Gestisci tutte le scommesse non incassate come PERSE
+        gameSocket.broadcast("CRASH:" + finalMultiplier);
     }
 
-    // Algoritmo semplice per ora (da migliorare per fairness)
     private double generateCrashPoint() {
-        // Genera un punto di crash casuale pesato verso il basso
-        // Esempio basico: 1 / rand(0,1)
-
         double r = Math.random();
-        // 3% di chance di crash istantaneo (1.00x)
         if (r < 0.03)
-            return 1.00;
+            return 1.00; // 3% House Edge istantaneo
 
-        // Formula classica: multiplier = 0.99 / (1 - random)
-        // Ma limitiamolo per sicurezza
         double multiplier = 0.99 / (1 - r);
 
         if (multiplier < 1.00)
             multiplier = 1.00;
         if (multiplier > 100.00)
-            multiplier = 100.00; // Cap provvisorio
+            multiplier = 100.00;
 
         BigDecimal bd = new BigDecimal(multiplier).setScale(2, RoundingMode.FLOOR);
         return bd.doubleValue();
