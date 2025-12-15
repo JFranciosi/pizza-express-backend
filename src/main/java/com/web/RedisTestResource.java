@@ -20,16 +20,8 @@ public class RedisTestResource {
     @Produces(MediaType.TEXT_PLAIN)
     public String checkConnection() {
         try {
-            // 1. Proviamo a scrivere
             commands.set("test-key", "Funziona!");
-
-            // 2. Proviamo a leggere
             String value = commands.get("test-key");
-
-            // 3. Proviamo a leggere lo stato del gioco (se l'hai creato prima)
-            // Nota: per semplicità qui uso ValueCommands, ma game:current è un Hash.
-            // Se non da errore, vuol dire che è connesso.
-
             return "✅ SUCCESSO! Redis è connesso.\n" +
                     "Ho scritto e riletto: " + value;
 
