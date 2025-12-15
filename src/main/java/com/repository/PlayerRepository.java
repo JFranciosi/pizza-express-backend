@@ -5,6 +5,7 @@ import io.quarkus.redis.datasource.RedisDataSource;
 import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
+import io.quarkus.redis.datasource.value.SetArgs;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
@@ -58,8 +59,7 @@ public class PlayerRepository {
     }
 
     public void saveRefreshToken(String token, String playerId) {
-        // defined TTL for refresh token, e.g., 7 days (604800 seconds)
-        valueCommands.set("refresh_token:" + token, playerId);
+        valueCommands.set("refresh_token:" + token, playerId, new SetArgs().ex(604800));
     }
 
     public String validateRefreshToken(String token) {
