@@ -36,7 +36,7 @@ public class AuthService {
                 req.username,
                 req.email,
                 hashedPassword,
-                0.0);
+                500.0);
 
         playerRepository.save(player);
 

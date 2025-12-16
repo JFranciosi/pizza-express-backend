@@ -38,18 +38,28 @@ public class BettingService {
         if (amount <= 0) {
             throw new IllegalArgumentException("L'importo deve essere positivo");
         }
+        // MAX BET 100 EURO
+        if (amount > 100) {
+            throw new IllegalArgumentException("L'importo massimo è 100€");
+        }
+
         if (currentRoundBets.containsKey(userId)) {
             throw new IllegalStateException("Hai già piazzato una scommessa per questo round");
         }
 
-        // 2. Controllo saldo e prelievo (Logica semplificata, in produzione serve
-        // transazione DB)
-        // TODO: Agganciare PlayerRepository per decurtare il saldo reale
-        // Player player = playerRepository.findById(userId);
-        // if (player.getBalance() < amount) throw ...
-        // player.setBalance(player.getBalance() - amount);
-        // playerRepository.persist(player);
-        LOG.info("Prelievo simulato di " + amount + " per l'utente " + username);
+        // 2. Controllo saldo e prelievo reale
+        com.model.Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new IllegalStateException("Utente non trovato");
+        }
+        if (player.getBalance() < amount) {
+            throw new IllegalStateException("Saldo insufficiente");
+        }
+
+        player.setBalance(player.getBalance() - amount);
+        playerRepository.save(player);
+
+        LOG.info("Prelievo di " + amount + " per l'utente " + username + ". Nuovo saldo: " + player.getBalance());
 
         // 3. Registra scommessa
         Bet bet = new Bet(userId, username, game.getId(), amount);
@@ -83,13 +93,16 @@ public class BettingService {
         bet.setCashOutMultiplier(currentMultiplier);
         bet.setProfit(profit);
 
-        // 4. Accredito vincita (Simulato per ora)
-        // Player player = playerRepository.findById(userId);
-        // player.setBalance(player.getBalance() + winAmount);
-        // playerRepository.persist(player);
-
-        LOG.info("CASHOUT SUCCESSO! " + userId + " vince " + String.format("%.2f", winAmount) + "€ ("
-                + currentMultiplier + "x)");
+        // 4. Accredito vincita reale
+        com.model.Player player = playerRepository.findById(userId);
+        if (player != null) {
+            player.setBalance(player.getBalance() + winAmount);
+            playerRepository.save(player);
+            LOG.info("CASHOUT SUCCESSO! " + userId + " vince " + String.format("%.2f", winAmount) + "€ ("
+                    + currentMultiplier + "x). Nuovo saldo: " + player.getBalance());
+        } else {
+            LOG.error("Impossibile accreditare vincita, utente non trovato: " + userId);
+        }
     }
 
     public List<Bet> resetBetsForNewRound() {
