@@ -39,8 +39,7 @@ public class AuthService {
                 500.0);
 
         playerRepository.save(player);
-
-        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getId());
+        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
@@ -59,7 +58,7 @@ public class AuthService {
             throw new NotAuthorizedException("Invalid credentials");
         }
 
-        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getId());
+        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
@@ -81,7 +80,7 @@ public class AuthService {
         // Revoke old refresh token (optional, but good practice for rotation)
         playerRepository.deleteRefreshToken(req.refreshToken);
 
-        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getId());
+        String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String newRefreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(newRefreshToken, player.getId());
 

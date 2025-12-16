@@ -80,6 +80,7 @@ public class BettingService {
         });
 
         LOG.info("Scommessa piazzata: " + username + " - " + amount + "€ (Auto: " + autoCashout + "x)");
+        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount);
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
@@ -129,6 +130,7 @@ public class BettingService {
             playerRepository.save(player);
             LOG.info("CASHOUT SUCCESSO! " + userId + " vince " + String.format("%.2f", winAmount) + "€ ("
                     + currentMultiplier + "x). Nuovo saldo: " + player.getBalance());
+            gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount);
             return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
         } else {
             LOG.error("Impossibile accreditare vincita, utente non trovato: " + userId);
@@ -171,6 +173,7 @@ public class BettingService {
             playerRepository.save(player);
             LOG.info("Scommessa cancellata per " + userId + ". Rimborso: " + bet.getAmount() + "€. Nuovo saldo: "
                     + player.getBalance());
+            gameEngine.broadcast("CANCEL_BET:" + userId);
         }
     }
 

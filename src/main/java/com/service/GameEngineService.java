@@ -255,4 +255,8 @@ public class GameEngineService {
     public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory() {
         return listCommands.lrange("game:history", 0, 49);
     }
+
+    public void broadcast(String message) {
+        gameSocket.broadcast(message);
+    }
 }

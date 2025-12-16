@@ -9,9 +9,10 @@ import java.util.Set;
 @ApplicationScoped
 public class TokenService {
 
-    public String generateAccessToken(String email, String userId) {
+    public String generateAccessToken(String email, String username, String userId) {
         return Jwt.issuer("https://pizza-express.com/issuer")
                 .upn(email)
+                .claim("username", username)
                 .groups(Set.of("User"))
                 .claim("userId", userId)
                 .expiresIn(3600) // 1 hour
@@ -39,6 +40,6 @@ public class TokenService {
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }
-        return parser.parse(token).getClaim("upn"); // upn usually stores email/username
+        return parser.parse(token).getClaim("username");
     }
 }
