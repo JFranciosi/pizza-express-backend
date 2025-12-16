@@ -41,7 +41,9 @@ public class GameSocket {
         // Invia lo stato corrente del gioco appena ci si connette
         Game currentGame = gameEngine.getCurrentGame();
         if (currentGame != null) {
-            connection.sendTextAndAwait("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier());
+            connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore onOpen", t));
         }
     }
 
@@ -64,7 +66,9 @@ public class GameSocket {
             if (message.startsWith("BET:")) {
                 String[] parts = message.split(":");
                 if (parts.length < 4) {
-                    connection.sendTextAndAwait("ERROR:Formato scommessa errato. Usa BET:userId:username:amount");
+                    connection.sendText("ERROR:Formato scommessa errato. Usa BET:userId:username:amount")
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio errore", t));
                     return;
                 }
                 String userId = parts[1];
@@ -75,11 +79,15 @@ public class GameSocket {
                     bettingService.placeBet(userId, username, amount);
                     return null;
                 }).onSuccess(res -> {
-                    connection.sendTextAndAwait("BET_OK:" + amount);
+                    connection.sendText("BET_OK:" + amount)
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio BET_OK", t));
                     broadcast("BET_ANNOUNCEMENT:" + username + ":" + amount);
                 }).onFailure(err -> {
                     LOG.error("Errore placeBet", err);
-                    connection.sendTextAndAwait("ERROR:" + err.getMessage());
+                    connection.sendText("ERROR:" + err.getMessage())
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio ERROR placeBet", t));
                 });
 
             } else if (message.startsWith("CASHOUT:")) {
@@ -90,26 +98,32 @@ public class GameSocket {
                     bettingService.cashOut(userId);
                     return null;
                 }).onSuccess(res -> {
-                    connection.sendTextAndAwait("CASHOUT_OK");
+                    connection.sendText("CASHOUT_OK")
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio CASHOUT_OK", t));
                 }).onFailure(err -> {
                     LOG.error("Errore cashOut", err);
-                    connection.sendTextAndAwait("ERROR:" + err.getMessage());
+                    connection.sendText("ERROR:" + err.getMessage())
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio ERROR cashOut", t));
                 });
             }
         } catch (Exception e) {
             LOG.error("Errore gestione messaggio: " + message, e);
-            connection.sendTextAndAwait("ERROR:" + e.getMessage());
+            connection.sendText("ERROR:" + e.getMessage())
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore invio Exception", t));
         }
     }
 
     // Metodo per il broadcast chiamato dal GameEngineService
     public void broadcast(String message) {
         sessions.forEach(s -> {
-            try {
-                s.sendTextAndAwait(message);
-            } catch (Exception e) {
-                LOG.error("Errore invio messaggio a " + s.id(), e);
-            }
+            s.sendText(message)
+                    .subscribe().with(
+                            item -> {
+                            },
+                            failure -> LOG.error("Errore invio messaggio a " + s.id(), failure));
         });
     }
 }
