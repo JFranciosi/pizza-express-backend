@@ -59,7 +59,15 @@ public class GameEngineService {
         currentGame.setId(UUID.randomUUID().toString());
         currentGame.setStatus(GameState.WAITING);
         currentGame.setMultiplier(1.00);
-        currentGame.setCrashPoint(generateCrashPoint());
+        double crashPoint = generateCrashPoint();
+        currentGame.setCrashPoint(crashPoint);
+
+        // Provably Fair: Genera secret e hash
+        String secret = UUID.randomUUID().toString();
+        String hash = generateHash(secret, crashPoint);
+        currentGame.setSecret(secret);
+        currentGame.setHash(hash);
+
         currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
 
         bettingService.resetBetsForNewRound();
@@ -147,12 +155,21 @@ public class GameEngineService {
     private void saveGameToRedis() {
         vertx.executeBlocking(() -> {
             try {
-                hashCommands.hset("game:current", java.util.Map.of(
-                        "id", currentGame.getId(),
-                        "status", currentGame.getStatus().name(),
-                        "multiplier", String.valueOf(currentGame.getMultiplier()),
-                        "startTime", String.valueOf(currentGame.getStartTime()),
-                        "crashPoint", String.valueOf(currentGame.getCrashPoint())));
+                java.util.Map<String, String> data = new java.util.HashMap<>();
+                data.put("id", currentGame.getId());
+                data.put("status", currentGame.getStatus().name());
+                data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
+                data.put("startTime", String.valueOf(currentGame.getStartTime()));
+                data.put("hash", currentGame.getHash());
+
+                if (currentGame.getStatus() == GameState.CRASHED) {
+                    data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
+                    data.put("secret", currentGame.getSecret());
+                } else {
+                    data.put("crashPoint", "HIDDEN");
+                }
+
+                hashCommands.hset("game:current", data);
                 return null;
             } catch (Exception e) {
                 LOG.error("Errore salvataggio game su Redis", e);
@@ -165,7 +182,7 @@ public class GameEngineService {
         vertx.executeBlocking(() -> {
             try {
                 listCommands.lpush("game:history", String.valueOf(crashPoint));
-                listCommands.ltrim("game:history", 0, 49); // Tieni solo ultimi 50
+                listCommands.ltrim("game:history", 0, 49);
                 return null;
             } catch (Exception e) {
                 LOG.error("Errore salvataggio history su Redis", e);
@@ -177,7 +194,7 @@ public class GameEngineService {
     private double generateCrashPoint() {
         double r = Math.random();
         if (r < 0.03)
-            return 1.00; // 3% House Edge istantaneo
+            return 1.00;
 
         double multiplier = 0.99 / (1 - r);
 
@@ -188,6 +205,29 @@ public class GameEngineService {
 
         BigDecimal bd = new BigDecimal(multiplier).setScale(2, RoundingMode.FLOOR);
         return bd.doubleValue();
+    }
+
+    private String generateHash(String secret, double crashPoint) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            String toHash = secret + ":" + crashPoint;
+            byte[] encodedhash = digest.digest(toHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return bytesToHex(encodedhash);
+        } catch (Exception e) {
+            throw new RuntimeException("Errore SHA-256", e);
+        }
+    }
+
+    private static String bytesToHex(byte[] hash) {
+        StringBuilder hexString = new StringBuilder(2 * hash.length);
+        for (int i = 0; i < hash.length; i++) {
+            String hex = Integer.toHexString(0xff & hash[i]);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 
     public Game getCurrentGame() {
