@@ -191,7 +191,7 @@ public class GameEngineService {
 
     private void saveToHistory(double crashPoint) {
         listCommands.lpush("game:history", String.valueOf(crashPoint))
-                .chain(v -> listCommands.ltrim("game:history", 0, 49))
+                .chain(v -> listCommands.ltrim("game:history", 0, 199))
                 .subscribe().with(v -> {
                 }, t -> {
                     if (t.getMessage() == null || !t.getMessage().contains("Client is closed")) {
