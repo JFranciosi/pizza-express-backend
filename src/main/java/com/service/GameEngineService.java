@@ -214,8 +214,8 @@ public class GameEngineService {
 
         if (multiplier < 1.00)
             multiplier = 1.00;
-        if (multiplier > 100.00)
-            multiplier = 100.00;
+        if (multiplier > 100000.00)
+            multiplier = 100000.00;
 
         BigDecimal bd = new BigDecimal(multiplier).setScale(2, RoundingMode.FLOOR);
         return bd.doubleValue();
