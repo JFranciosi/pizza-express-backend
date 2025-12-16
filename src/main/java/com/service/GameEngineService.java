@@ -100,8 +100,7 @@ public class GameEngineService {
                 break;
 
             case CRASHED:
-                // Dopo un po' di tempo che è crashato, riavvia
-                if (now >= roundStartTime + 3000) { // 3 secondi di pausa post-crash
+                if (now >= roundStartTime + 10000) { // 10 secondi di pausa post-crash
                     startNewRound();
                 }
                 break;
