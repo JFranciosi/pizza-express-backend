@@ -42,12 +42,12 @@ The application will start on `http://localhost:8080`.
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Register new user (500€ Bonus) | ✅ |
-| `POST` | `/auth/login` | Login and get JWT | ✅ |
+| `POST` | `/auth/register` | Register new user (500€ Bonus) | ❌ |
+| `POST` | `/auth/login` | Login and get JWT | ❌ |
 | `POST` | `/bet/place` | Place a bet (Amount: 0.10 - 100) | ✅ |
 | `POST` | `/bet/cancel` | Cancel active bet (In Waiting Phase) | ✅ |
 | `POST` | `/bet/cashout` | Cash out current bet | ✅ |
-| `WS` | `/game` | WebSocket for Game Stream | ✅ |
+| `WS` | `/game` | WebSocket for Game Stream | ❌ |
 
 ## 🧪 Testing
 
