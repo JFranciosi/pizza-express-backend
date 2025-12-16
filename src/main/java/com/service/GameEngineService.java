@@ -176,14 +176,22 @@ public class GameEngineService {
 
         hashCommands.hset("game:current", data)
                 .subscribe().with(v -> {
-                }, t -> LOG.error("Errore salvataggio game su Redis", t));
+                }, t -> {
+                    if (t.getMessage() == null || !t.getMessage().contains("Client is closed")) {
+                        LOG.error("Errore salvataggio game su Redis", t);
+                    }
+                });
     }
 
     private void saveToHistory(double crashPoint) {
         listCommands.lpush("game:history", String.valueOf(crashPoint))
                 .chain(v -> listCommands.ltrim("game:history", 0, 49))
                 .subscribe().with(v -> {
-                }, t -> LOG.error("Errore salvataggio history su Redis", t));
+                }, t -> {
+                    if (t.getMessage() == null || !t.getMessage().contains("Client is closed")) {
+                        LOG.error("Errore salvataggio history su Redis", t);
+                    }
+                });
     }
 
     private double generateCrashPoint() {
