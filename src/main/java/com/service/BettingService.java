@@ -31,7 +31,7 @@ public class BettingService {
         return Math.round(value * 100.0) / 100.0;
     }
 
-    public void placeBet(String userId, String username, double amount) {
+    public void placeBet(String userId, String username, double amount, double autoCashout) {
         Game game = gameEngine.getCurrentGame();
 
         // 1. Validazioni preliminari (Fail fast)
@@ -74,10 +74,26 @@ public class BettingService {
             LOG.info("Prelievo di " + finalAmount + " per l'utente " + username + ". Nuovo saldo: "
                     + player.getBalance());
 
-            return new Bet(userId, username, game.getId(), finalAmount);
+            Bet bet = new Bet(userId, username, game.getId(), finalAmount);
+            bet.setAutoCashout(autoCashout);
+            return bet;
         });
 
-        LOG.info("Scommessa piazzata: " + username + " - " + amount + "€");
+        LOG.info("Scommessa piazzata: " + username + " - " + amount + "€ (Auto: " + autoCashout + "x)");
+    }
+
+    public void checkAutoCashouts(double currentMultiplier) {
+        currentRoundBets.values().forEach(bet -> {
+            if (bet.getCashOutMultiplier() == 0 && bet.getAutoCashout() > 1.00
+                    && currentMultiplier >= bet.getAutoCashout()) {
+                try {
+                    cashOut(bet.getUserId());
+                    LOG.info("AUTO-CASHOUT eseguito per " + bet.getUsername() + " a " + currentMultiplier + "x");
+                } catch (Exception e) {
+                    LOG.error("Errore durante auto-cashout per " + bet.getUsername(), e);
+                }
+            }
+        });
     }
 
     public CashOutResult cashOut(String userId) {

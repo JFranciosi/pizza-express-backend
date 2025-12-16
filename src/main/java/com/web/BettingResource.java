@@ -20,6 +20,7 @@ public class BettingResource {
 
     public static class BetRequest {
         public double amount;
+        public double autoCashout;
     }
 
     @POST
@@ -28,7 +29,7 @@ public class BettingResource {
         try {
             String userId = tokenService.getUserIdFromToken(token);
             String username = tokenService.getUsernameFromToken(token);
-            bettingService.placeBet(userId, username, req.amount);
+            bettingService.placeBet(userId, username, req.amount, req.autoCashout);
             return Response.ok().build();
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();

@@ -86,7 +86,7 @@ public class GameSocket {
                 double amount = Double.parseDouble(parts[3]);
 
                 vertx.executeBlocking(() -> {
-                    bettingService.placeBet(userId, username, amount);
+                    bettingService.placeBet(userId, username, amount, 0.0);
                     return null;
                 }).onSuccess(res -> {
                     connection.sendText("BET_OK:" + amount)

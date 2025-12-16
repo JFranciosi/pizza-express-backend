@@ -148,6 +148,11 @@ public class GameEngineService {
             // ma se serve real-time per chi entra dopo, si può decommentare:
             // saveGameToRedis();
 
+            vertx.executeBlocking(() -> {
+                bettingService.checkAutoCashouts(currentMultiplier);
+                return null;
+            }).onFailure(t -> LOG.error("Auto-cashout error", t));
+
             gameSocket.broadcast("TICK:" + currentMultiplier);
         }
     }

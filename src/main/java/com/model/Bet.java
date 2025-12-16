@@ -5,6 +5,7 @@ public class Bet {
     private String username;
     private String gameId;
     private double amount;
+    private double autoCashout;
     private double cashOutMultiplier;
     private double profit;
 
@@ -20,21 +21,59 @@ public class Bet {
     }
 
     // Getter e Setter
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
+    public String getUserId() {
+        return userId;
+    }
 
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
 
-    public String getGameId() { return gameId; }
-    public void setGameId(String gameId) { this.gameId = gameId; }
+    public String getUsername() {
+        return username;
+    }
 
-    public double getAmount() { return amount; }
-    public void setAmount(double amount) { this.amount = amount; }
+    public void setUsername(String username) {
+        this.username = username;
+    }
 
-    public double getCashOutMultiplier() { return cashOutMultiplier; }
-    public void setCashOutMultiplier(double cashOutMultiplier) { this.cashOutMultiplier = cashOutMultiplier; }
+    public String getGameId() {
+        return gameId;
+    }
 
-    public double getProfit() { return profit; }
-    public void setProfit(double profit) { this.profit = profit; }
+    public void setGameId(String gameId) {
+        this.gameId = gameId;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+
+    public double getAutoCashout() {
+        return autoCashout;
+    }
+
+    public void setAutoCashout(double autoCashout) {
+        this.autoCashout = autoCashout;
+    }
+
+    public double getCashOutMultiplier() {
+        return cashOutMultiplier;
+    }
+
+    public void setCashOutMultiplier(double cashOutMultiplier) {
+        this.cashOutMultiplier = cashOutMultiplier;
+    }
+
+    public double getProfit() {
+        return profit;
+    }
+
+    public void setProfit(double profit) {
+        this.profit = profit;
+    }
 }
