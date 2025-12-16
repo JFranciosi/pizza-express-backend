@@ -45,6 +45,16 @@ public class GameSocket {
                     .subscribe().with(v -> {
                     }, t -> LOG.error("Errore onOpen", t));
         }
+
+        // Invia la history degli ultimi crash
+        gameEngine.getHistory().subscribe().with(history -> {
+            if (history != null && !history.isEmpty()) {
+                String historyMsg = "HISTORY:" + String.join(",", history);
+                connection.sendText(historyMsg)
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio HISTORY", t));
+            }
+        }, t -> LOG.error("Errore recupero history Redis", t));
     }
 
     @OnClose

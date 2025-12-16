@@ -242,4 +242,12 @@ public class GameEngineService {
     public Game getCurrentGame() {
         return currentGame;
     }
+
+    public io.smallrye.mutiny.Uni<java.util.List<String>> getHistory() {
+        return listCommands.lrange("game:history", 0, 9);
+    }
+
+    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory() {
+        return listCommands.lrange("game:history", 0, 49);
+    }
 }
