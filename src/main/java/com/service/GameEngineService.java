@@ -26,6 +26,7 @@ public class GameEngineService {
 
     // Stato interno per il loop
     private long roundStartTime;
+    private long timerId;
 
     @Inject
     GameSocket gameSocket;
@@ -50,8 +51,13 @@ public class GameEngineService {
         if (currentGame == null) {
             startNewRound();
             // Avvia il loop di gioco ogni 100ms
-            vertx.setPeriodic(100, id -> gameLoop());
+            timerId = vertx.setPeriodic(100, id -> gameLoop());
         }
+    }
+
+    @jakarta.annotation.PreDestroy
+    void destroy() {
+        vertx.cancelTimer(timerId);
     }
 
     private void startNewRound() {
