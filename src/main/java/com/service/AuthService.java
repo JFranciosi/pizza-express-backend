@@ -44,7 +44,8 @@ public class AuthService {
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
-        return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername());
+        return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
+                player.getBalance());
     }
 
     public AuthResponse login(LoginRequest req) {
@@ -62,7 +63,8 @@ public class AuthService {
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
-        return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername());
+        return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
+                player.getBalance());
     }
 
     public AuthResponse refresh(RefreshRequest req) {
@@ -83,6 +85,7 @@ public class AuthService {
         String newRefreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(newRefreshToken, player.getId());
 
-        return new AuthResponse(accessToken, newRefreshToken, player.getId(), player.getUsername());
+        return new AuthResponse(accessToken, newRefreshToken, player.getId(), player.getUsername(), player.getEmail(),
+                player.getBalance());
     }
 }
