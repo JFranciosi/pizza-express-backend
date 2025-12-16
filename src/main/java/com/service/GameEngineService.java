@@ -21,7 +21,7 @@ public class GameEngineService {
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     // Configurazione gioco
-    private static final long WAITING_TIME_MS = 5000; // 5 secondi di attesa
+    private static final long WAITING_TIME_MS = 10000; // 10 secondi di attesa
     private static final double GROWTH_RATE = 0.00006; // Velocità di crescita (da calibrare)
 
     // Stato interno per il loop
@@ -36,11 +36,11 @@ public class GameEngineService {
     @Inject
     io.vertx.core.Vertx vertx;
 
-    private final io.quarkus.redis.datasource.hash.HashCommands<String, String, String> hashCommands;
-    private final io.quarkus.redis.datasource.list.ListCommands<String, String> listCommands;
+    private final io.quarkus.redis.datasource.hash.ReactiveHashCommands<String, String, String> hashCommands;
+    private final io.quarkus.redis.datasource.list.ReactiveListCommands<String, String> listCommands;
 
     @Inject
-    public GameEngineService(io.quarkus.redis.datasource.RedisDataSource ds) {
+    public GameEngineService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
         this.hashCommands = ds.hash(String.class);
         this.listCommands = ds.list(String.class);
     }
@@ -79,6 +79,8 @@ public class GameEngineService {
         gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
     }
 
+    private long lastSecondsBroadcast = -1;
+
     // Rimosso @Scheduled, ora chiamato da Vert.x
     void gameLoop() {
         if (currentGame == null)
@@ -91,7 +93,12 @@ public class GameEngineService {
                 if (now >= currentGame.getStartTime()) {
                     startGame();
                 } else {
-                    // Opzionale: broadcast countdown
+                    long remainingMs = currentGame.getStartTime() - now;
+                    long remainingSeconds = remainingMs / 1000;
+                    if (remainingSeconds != lastSecondsBroadcast) {
+                        gameSocket.broadcast("TIMER:" + remainingSeconds);
+                        lastSecondsBroadcast = remainingSeconds;
+                    }
                 }
                 break;
 
@@ -153,42 +160,30 @@ public class GameEngineService {
     }
 
     private void saveGameToRedis() {
-        vertx.executeBlocking(() -> {
-            try {
-                java.util.Map<String, String> data = new java.util.HashMap<>();
-                data.put("id", currentGame.getId());
-                data.put("status", currentGame.getStatus().name());
-                data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
-                data.put("startTime", String.valueOf(currentGame.getStartTime()));
-                data.put("hash", currentGame.getHash());
+        java.util.Map<String, String> data = new java.util.HashMap<>();
+        data.put("id", currentGame.getId());
+        data.put("status", currentGame.getStatus().name());
+        data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
+        data.put("startTime", String.valueOf(currentGame.getStartTime()));
+        data.put("hash", currentGame.getHash());
 
-                if (currentGame.getStatus() == GameState.CRASHED) {
-                    data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
-                    data.put("secret", currentGame.getSecret());
-                } else {
-                    data.put("crashPoint", "HIDDEN");
-                }
+        if (currentGame.getStatus() == GameState.CRASHED) {
+            data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
+            data.put("secret", currentGame.getSecret());
+        } else {
+            data.put("crashPoint", "HIDDEN");
+        }
 
-                hashCommands.hset("game:current", data);
-                return null;
-            } catch (Exception e) {
-                LOG.error("Errore salvataggio game su Redis", e);
-                throw e;
-            }
-        });
+        hashCommands.hset("game:current", data)
+                .subscribe().with(v -> {
+                }, t -> LOG.error("Errore salvataggio game su Redis", t));
     }
 
     private void saveToHistory(double crashPoint) {
-        vertx.executeBlocking(() -> {
-            try {
-                listCommands.lpush("game:history", String.valueOf(crashPoint));
-                listCommands.ltrim("game:history", 0, 49);
-                return null;
-            } catch (Exception e) {
-                LOG.error("Errore salvataggio history su Redis", e);
-                throw e;
-            }
-        });
+        listCommands.lpush("game:history", String.valueOf(crashPoint))
+                .chain(v -> listCommands.ltrim("game:history", 0, 49))
+                .subscribe().with(v -> {
+                }, t -> LOG.error("Errore salvataggio history su Redis", t));
     }
 
     private double generateCrashPoint() {
