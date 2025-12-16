@@ -42,7 +42,21 @@ public class BettingResource {
     public Response cashOut(@HeaderParam("Authorization") String token) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
-            bettingService.cashOut(userId);
+            BettingService.CashOutResult result = bettingService.cashOut(userId);
+            return Response.ok(result).build();
+        } catch (IllegalStateException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
+        } catch (Exception e) {
+            return Response.serverError().entity(new ErrorResponse("Errore interno")).build();
+        }
+    }
+
+    @POST
+    @Path("/cancel")
+    public Response cancelBet(@HeaderParam("Authorization") String token) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+            bettingService.cancelBet(userId);
             return Response.ok().build();
         } catch (IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
