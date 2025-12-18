@@ -249,7 +249,7 @@ public class GameEngineService {
     }
 
     public io.smallrye.mutiny.Uni<java.util.List<String>> getHistory() {
-        return listCommands.lrange("game:history", 0, 9);
+        return listCommands.lrange("game:history", 0, 199);
     }
 
     public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
