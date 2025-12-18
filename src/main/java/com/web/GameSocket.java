@@ -1,6 +1,5 @@
 package com.web;
 
-import com.model.Bet;
 import com.model.Game;
 import com.service.BettingService;
 import com.service.GameEngineService;
@@ -11,9 +10,6 @@ import io.quarkus.websockets.next.WebSocket;
 import io.quarkus.websockets.next.WebSocketConnection;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
