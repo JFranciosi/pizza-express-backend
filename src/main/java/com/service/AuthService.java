@@ -87,4 +87,20 @@ public class AuthService {
         return new AuthResponse(accessToken, newRefreshToken, player.getId(), player.getUsername(), player.getEmail(),
                 player.getBalance());
     }
+
+    public void changePassword(String userId, String oldPass, String newPass) {
+        Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new NotAuthorizedException("User not found");
+        }
+
+        BCrypt.Result result = BCrypt.verifyer().verify(oldPass.toCharArray(), player.getPasswordHash());
+        if (!result.verified) {
+            throw new BadRequestException("Incorrect old password");
+        }
+
+        String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
+        player.setPasswordHash(newHashed);
+        playerRepository.save(player);
+    }
 }

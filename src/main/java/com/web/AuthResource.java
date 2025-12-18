@@ -18,8 +18,31 @@ import jakarta.ws.rs.core.Response;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AuthResource {
 
+    public static class ChangePasswordRequest {
+        public String userId; // Optional if passed via token, but frontend sends body
+        public String oldPass;
+        public String newPass;
+    }
+
     @Inject
     AuthService authService;
+
+    @Inject
+    com.service.TokenService tokenService;
+
+    @POST
+    @Path("/change-password")
+    public Response changePassword(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+            ChangePasswordRequest req) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+            authService.changePassword(userId, req.oldPass, req.newPass);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
+    }
 
     @POST
     @Path("/register")
