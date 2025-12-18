@@ -20,7 +20,8 @@ public class GameResource {
     @GET
     @Path("/history")
     @PermitAll
-    public Uni<List<String>> getFullHistory() {
-        return gameEngine.getFullHistory();
+    public Uni<List<String>> getFullHistory(@jakarta.ws.rs.QueryParam("limit") Integer limit) {
+        int actualLimit = (limit != null && limit > 0) ? limit : 50; // Default 50 if not specified
+        return gameEngine.getFullHistory(actualLimit);
     }
 }

@@ -252,8 +252,10 @@ public class GameEngineService {
         return listCommands.lrange("game:history", 0, 9);
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory() {
-        return listCommands.lrange("game:history", 0, 49);
+    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
+        // Limit max to 200 as per ltrim
+        int max = Math.min(limit, 200);
+        return listCommands.lrange("game:history", 0, max - 1);
     }
 
     public void broadcast(String message) {
