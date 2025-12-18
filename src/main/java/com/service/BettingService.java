@@ -27,6 +27,14 @@ public class BettingService {
     @Inject
     GameEngineService gameEngine;
 
+    // Cache locker per utente per evitare race conditions sul saldo
+    private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
+
+    // Helper per ottenere il lock per un utente
+    private Object getUserLock(String userId) {
+        return userLocks.computeIfAbsent(userId, k -> new Object());
+    }
+
     // Helper per generare la chiave composta (userId:index)
     private String getBetKey(String userId, int index) {
         return userId + ":" + index;
@@ -55,22 +63,24 @@ public class BettingService {
                 throw new IllegalStateException("Hai già piazzato questa scommessa (" + index + ")");
             }
 
-            com.model.Player player = playerRepository.findById(userId);
-            if (player == null)
-                throw new IllegalStateException("Utente non trovato");
-            if (player.getBalance() < amount)
-                throw new IllegalStateException("Saldo insufficiente");
+            // CRITICO: Lock per utente per evitare race condition sul saldo
+            synchronized (getUserLock(userId)) {
+                com.model.Player player = playerRepository.findById(userId);
+                if (player == null)
+                    throw new IllegalStateException("Utente non trovato");
+                if (player.getBalance() < amount)
+                    throw new IllegalStateException("Saldo insufficiente");
 
-            double finalAmount = round(amount);
-            double newBalance = round(player.getBalance() - finalAmount);
+                double finalAmount = round(amount);
+                double newBalance = round(player.getBalance() - finalAmount);
 
-            player.setBalance(newBalance);
-            playerRepository.save(player);
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+                LOG.info("Prelievo " + finalAmount + " per " + username + " (Bet " + index + "). Nuovo saldo: "
+                        + player.getBalance());
+            }
 
-            LOG.info("Prelievo " + finalAmount + " per " + username + " (Bet " + index + "). Nuovo saldo: "
-                    + player.getBalance());
-
-            Bet bet = new Bet(userId, username, game.getId(), finalAmount, index);
+            Bet bet = new Bet(userId, username, game.getId(), round(amount), index);
             bet.setAutoCashout(autoCashout);
             return bet;
         });
@@ -100,15 +110,18 @@ public class BettingService {
         bet.setCashOutMultiplier(currentMultiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
 
-        com.model.Player player = playerRepository.findById(userId);
-        if (player != null) {
-            double newBalance = round(player.getBalance() + winAmount);
-            player.setBalance(newBalance);
-            playerRepository.save(player);
-            LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€. Nuovo saldo: "
-                    + player.getBalance());
-            gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount + ":" + index);
-            return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
+        // CRITICO: Lock per utente per aggiornare saldo
+        synchronized (getUserLock(userId)) {
+            com.model.Player player = playerRepository.findById(userId);
+            if (player != null) {
+                double newBalance = round(player.getBalance() + winAmount);
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+                LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€. Nuovo saldo: "
+                        + player.getBalance());
+                gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount + ":" + index);
+                return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
+            }
         }
         throw new IllegalStateException("Utente non trovato");
     }
@@ -143,13 +156,16 @@ public class BettingService {
 
         currentRoundBets.remove(betKey);
 
-        com.model.Player player = playerRepository.findById(userId);
-        if (player != null) {
-            double newBalance = round(player.getBalance() + bet.getAmount());
-            player.setBalance(newBalance);
-            playerRepository.save(player);
-            LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
-            gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
+        // CRITICO: Lock per utente per rimborso
+        synchronized (getUserLock(userId)) {
+            com.model.Player player = playerRepository.findById(userId);
+            if (player != null) {
+                double newBalance = round(player.getBalance() + bet.getAmount());
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+                LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
+                gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
+            }
         }
     }
 
