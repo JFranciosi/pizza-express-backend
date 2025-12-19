@@ -59,7 +59,7 @@ public class PlayerRepository {
     }
 
     public void saveRefreshToken(String token, String playerId) {
-        valueCommands.set("refresh_token:" + token, playerId, new SetArgs().ex(604800));
+        valueCommands.set("refresh_token:" + token, playerId, new SetArgs().ex(7200)); // 2 hours
     }
 
     public String validateRefreshToken(String token) {
