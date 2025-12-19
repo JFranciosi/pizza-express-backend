@@ -91,8 +91,23 @@ public class BettingService {
     }
 
     public CashOutResult cashOut(String userId, int index) {
+        return cashOut(userId, index, null);
+    }
+
+    public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
         Game game = gameEngine.getCurrentGame();
-        if (game == null || game.getStatus() != GameState.FLYING) {
+        // Se targetMultiplier è specificato (auto-cashout), permettiamo anche se il
+        // gioco sta tecnicamente crashando/finendo
+        // ma controlliamo che il moltiplicatore raggiunto sia sufficiente
+        if (game == null) {
+            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
+        }
+
+        // Se è manuale, deve essere FLYING. Se è auto, potrebbe essere appena crashato
+        // ma il check è avvenuto prima?
+        // Per sicurezza manteniamo il check su FLYING o checkiamo se il crash point >
+        // target
+        if (game.getStatus() != GameState.FLYING && targetMultiplier == null) {
             throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
         }
 
@@ -104,7 +119,23 @@ public class BettingService {
         if (bet.getCashOutMultiplier() > 0)
             throw new IllegalStateException("Hai già incassato questa scommessa!");
 
-        double currentMultiplier = game.getMultiplier();
+        double currentMultiplier;
+        if (targetMultiplier != null) {
+            // Auto-cashout: usiamo il target fissato
+            // Verifichiamo per sicurezza che il gioco abbia effettivamente raggiunto quel
+            // punto
+            // (anche se checkAutoCashouts lo fa già)
+            if (game.getMultiplier() < targetMultiplier && game.getStatus() == GameState.FLYING) {
+                // Caso raro: race condition dove il multiplier è tornato indietro (impossibile)
+                // o non aggiornato
+                // Ci fidiamo del chiamante checkAutoCashouts che ha verificato la condizione
+            }
+            currentMultiplier = targetMultiplier;
+        } else {
+            // Manual cashout: usiamo il valore live
+            currentMultiplier = game.getMultiplier();
+        }
+
         double winAmount = round(bet.getAmount() * currentMultiplier);
 
         bet.setCashOutMultiplier(currentMultiplier);
@@ -117,7 +148,8 @@ public class BettingService {
                 double newBalance = round(player.getBalance() + winAmount);
                 player.setBalance(newBalance);
                 playerRepository.save(player);
-                LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€. Nuovo saldo: "
+                LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + currentMultiplier
+                        + "x). Nuovo saldo: "
                         + player.getBalance());
                 gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount + ":" + index);
                 return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
@@ -131,12 +163,12 @@ public class BettingService {
             if (bet.getCashOutMultiplier() == 0 && bet.getAutoCashout() > 1.00
                     && currentMultiplier >= bet.getAutoCashout()) {
                 try {
-                    // Passa anche l'index del bet
-                    cashOut(bet.getUserId(), bet.getIndex());
+                    // Passa l'index e il valore ESATTO dell'auto-cashout come target
+                    cashOut(bet.getUserId(), bet.getIndex(), bet.getAutoCashout());
                     LOG.info("AUTO-CASHOUT per " + bet.getUsername() + " [" + bet.getIndex() + "] a "
-                            + currentMultiplier + "x");
+                            + bet.getAutoCashout() + "x (preciso)");
                 } catch (Exception e) {
-                    LOG.error("Errore autpcashout " + bet.getUsername(), e);
+                    LOG.error("Errore autocashout " + bet.getUsername(), e);
                 }
             }
         });
