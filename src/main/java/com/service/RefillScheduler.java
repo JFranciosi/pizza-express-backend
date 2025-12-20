@@ -19,7 +19,7 @@ public class RefillScheduler {
     @Inject
     PlayerRepository playerRepository;
 
-    @Scheduled(every = "1h")
+    @Scheduled(every = "1m")
     void processRefills() {
         LOG.info("Running Auto-Refill check...");
         long now = System.currentTimeMillis();

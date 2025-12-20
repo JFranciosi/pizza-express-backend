@@ -49,7 +49,6 @@ public class GameResource {
     @Path("/debug/check-all-balances")
     @PermitAll
     public String checkAllBalances() {
-        int count = playerRepository.scanAndFixZeroBalances();
-        return "Scanned all players. Found and queued " + count + " users with zero balance.";
+        return playerRepository.scanAndFixZeroBalances();
     }
 }
