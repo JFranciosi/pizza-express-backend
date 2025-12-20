@@ -6,21 +6,44 @@ import io.quarkus.redis.datasource.hash.HashCommands;
 import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
+import io.quarkus.redis.datasource.sortedset.ZAddArgs;
+import io.quarkus.redis.datasource.sortedset.ScoreRange;
+import io.quarkus.redis.datasource.sortedset.ScoredValue;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.Map;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class PlayerRepository {
 
+    private static final Logger LOG = Logger.getLogger(PlayerRepository.class);
+
     private final HashCommands<String, String, String> hashCommands;
     private final ValueCommands<String, String> valueCommands;
     private final KeyCommands<String> keyCommands;
+    private final io.quarkus.redis.datasource.sortedset.SortedSetCommands<String, String> sortedSetCommands;
 
     public PlayerRepository(RedisDataSource ds) {
         this.hashCommands = ds.hash(String.class);
         this.valueCommands = ds.value(String.class);
         this.keyCommands = ds.key();
+        this.sortedSetCommands = ds.sortedSet(String.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    public void markZeroBalance(String playerId) {
+        sortedSetCommands.zadd("player:zero_balance", new ZAddArgs().nx(),
+                ScoredValue.of(playerId, (double) System.currentTimeMillis()));
+    }
+
+    public void clearZeroBalance(String playerId) {
+        sortedSetCommands.zrem("player:zero_balance", playerId);
+    }
+
+    public java.util.List<String> findEligibleForRefill(long cutoffTime) {
+        return sortedSetCommands.zrangebyscore("player:zero_balance",
+                ScoreRange.from(0.0, cutoffTime));
     }
 
     public void save(Player player) {
@@ -104,5 +127,38 @@ public class PlayerRepository {
 
     public void deleteResetToken(String token) {
         keyCommands.del("reset_token:" + token);
+    }
+
+    public int scanAndFixZeroBalances() {
+        int count = 0;
+        Iterable<String> keys = keyCommands.keys("player:*");
+        LOG.info("Starting scan of player keys...");
+
+        for (String key : keys) {
+            // Ignore lookup keys
+            if (key.contains(":email:") || key.contains(":username:")) {
+                continue;
+            }
+
+            try {
+                // Get balance directly to avoid full object overhead
+                String balanceStr = hashCommands.hget(key, "balance");
+
+                if (balanceStr != null) {
+                    double balance = Double.parseDouble(balanceStr);
+                    if (balance < 0.10) {
+                        // Key is "player:<uuid>", extract UUID
+                        String playerId = key.substring(7);
+                        markZeroBalance(playerId);
+                        count++;
+                        LOG.info("MARKED zero balance for: " + playerId);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.error("Error scanning key: " + key, e);
+            }
+        }
+        LOG.info("Scan complete. Found " + count + " users.");
+        return count;
     }
 }

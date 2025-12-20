@@ -76,6 +76,12 @@ public class BettingService {
 
                 player.setBalance(newBalance);
                 playerRepository.save(player);
+
+                // Auto-Refill Logic: Track zero balance
+                if (player.getBalance() < 0.10) {
+                    playerRepository.markZeroBalance(userId);
+                }
+
                 LOG.info("Prelievo " + finalAmount + " per " + username + " (Bet " + index + "). Nuovo saldo: "
                         + player.getBalance());
             }
@@ -148,6 +154,12 @@ public class BettingService {
                 double newBalance = round(player.getBalance() + winAmount);
                 player.setBalance(newBalance);
                 playerRepository.save(player);
+
+                // Auto-Refill Logic: Clear zero balance status
+                if (player.getBalance() > 0) {
+                    playerRepository.clearZeroBalance(userId);
+                }
+
                 LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + currentMultiplier
                         + "x). Nuovo saldo: "
                         + player.getBalance());
@@ -195,6 +207,10 @@ public class BettingService {
                 double newBalance = round(player.getBalance() + bet.getAmount());
                 player.setBalance(newBalance);
                 playerRepository.save(player);
+
+                // Auto-Refill Logic: Clear zero balance status
+                playerRepository.clearZeroBalance(userId);
+
                 LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
                 gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
             }
