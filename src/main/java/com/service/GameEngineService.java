@@ -137,6 +137,11 @@ public class GameEngineService {
         // Formula esponenziale: E^(k * t)
         double rawMultiplier = Math.exp(GROWTH_RATE * timeElapsed);
 
+        if (Double.isInfinite(rawMultiplier) || Double.isNaN(rawMultiplier)) {
+            LOG.warn("Multiplier calculation overflow (Inf/NaN). Forcing crash.");
+            rawMultiplier = 100000.0; // Force max cap
+        }
+
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
         double currentMultiplier = bd.doubleValue();
 

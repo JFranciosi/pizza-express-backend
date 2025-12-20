@@ -129,36 +129,40 @@ public class PlayerRepository {
         keyCommands.del("reset_token:" + token);
     }
 
-    public int scanAndFixZeroBalances() {
+    public String scanAndFixZeroBalances() {
+        StringBuilder report = new StringBuilder();
         int count = 0;
         Iterable<String> keys = keyCommands.keys("player:*");
-        LOG.info("Starting scan of player keys...");
+        report.append("Starting scan...\n");
 
         for (String key : keys) {
             // Ignore lookup keys
             if (key.contains(":email:") || key.contains(":username:")) {
+                // report.append("Skipped lookup: ").append(key).append("\n");
                 continue;
             }
 
             try {
-                // Get balance directly to avoid full object overhead
                 String balanceStr = hashCommands.hget(key, "balance");
 
                 if (balanceStr != null) {
                     double balance = Double.parseDouble(balanceStr);
                     if (balance < 0.10) {
-                        // Key is "player:<uuid>", extract UUID
                         String playerId = key.substring(7);
                         markZeroBalance(playerId);
                         count++;
-                        LOG.info("MARKED zero balance for: " + playerId);
+                        report.append("✅ QUEUED: ").append(key).append(" (Bal: ").append(balanceStr).append(")\n");
+                    } else {
+                        report.append("➖ IGNORED: ").append(key).append(" (Bal: ").append(balanceStr).append(")\n");
                     }
+                } else {
+                    report.append("❓ NO BALANCE: ").append(key).append("\n");
                 }
             } catch (Exception e) {
-                LOG.error("Error scanning key: " + key, e);
+                report.append("❌ ERROR: ").append(key).append(" - ").append(e.getMessage()).append("\n");
             }
         }
-        LOG.info("Scan complete. Found " + count + " users.");
-        return count;
+        report.append("Done. Queued ").append(count).append(" users.");
+        return report.toString();
     }
 }
