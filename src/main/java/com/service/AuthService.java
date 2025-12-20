@@ -27,6 +27,9 @@ public class AuthService {
         if (playerRepository.existsByEmail(req.email)) {
             throw new BadRequestException("Email already in use");
         }
+        if (playerRepository.existsByUsername(req.username)) {
+            throw new BadRequestException("Username already in use");
+        }
 
         String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password.toCharArray());
         String id = UUID.randomUUID().toString();
@@ -57,6 +60,9 @@ public class AuthService {
         if (!result.verified) {
             throw new NotAuthorizedException("Invalid credentials");
         }
+
+        // Self-heal: ensure lookup keys exist for legacy users
+        playerRepository.ensureIndices(player);
 
         String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String refreshToken = tokenService.generateRefreshToken();
@@ -101,6 +107,36 @@ public class AuthService {
 
         String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
         player.setPasswordHash(newHashed);
+        playerRepository.save(player);
+    }
+
+    public void updateEmail(String userId, String newEmail, String password) {
+        Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new NotAuthorizedException("User not found");
+        }
+
+        // Verify password
+        if (password == null || password.isEmpty()) {
+            throw new BadRequestException("Password required");
+        }
+        BCrypt.Result result = BCrypt.verifyer().verify(password.toCharArray(), player.getPasswordHash());
+        if (!result.verified) {
+            throw new BadRequestException("Invalid password");
+        }
+
+        if (player.getEmail().equals(newEmail)) {
+            return; // No changes
+        }
+
+        if (playerRepository.existsByEmail(newEmail)) {
+            throw new BadRequestException("Email already in use");
+        }
+
+        // Clean up old email lookup
+        playerRepository.removeLookups(player.getEmail(), null);
+
+        player.setEmail(newEmail);
         playerRepository.save(player);
     }
 }

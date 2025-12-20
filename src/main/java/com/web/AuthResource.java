@@ -24,6 +24,11 @@ public class AuthResource {
         public String newPass;
     }
 
+    public static class UpdateProfileRequest {
+        public String email;
+        public String password;
+    }
+
     @Inject
     AuthService authService;
 
@@ -37,6 +42,20 @@ public class AuthResource {
         try {
             String userId = tokenService.getUserIdFromToken(token);
             authService.changePassword(userId, req.oldPass, req.newPass);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
+    }
+
+    @POST
+    @Path("/update-profile")
+    public Response updateProfile(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+            UpdateProfileRequest req) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+            authService.updateEmail(userId, req.email, req.password);
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)

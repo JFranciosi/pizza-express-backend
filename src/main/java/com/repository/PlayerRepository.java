@@ -32,6 +32,14 @@ public class PlayerRepository {
                 "password", player.getPasswordHash(),
                 "balance", String.valueOf(player.getBalance())));
         valueCommands.set("player:email:" + player.getEmail(), player.getId());
+        valueCommands.set("player:username:" + player.getUsername(), player.getId());
+    }
+
+    public void removeLookups(String email, String username) {
+        if (email != null)
+            keyCommands.del("player:email:" + email);
+        if (username != null)
+            keyCommands.del("player:username:" + username);
     }
 
     public Player findById(String id) {
@@ -56,6 +64,16 @@ public class PlayerRepository {
 
     public boolean existsByEmail(String email) {
         return valueCommands.get("player:email:" + email) != null;
+    }
+
+    public boolean existsByUsername(String username) {
+        return valueCommands.get("player:username:" + username) != null;
+    }
+
+    public void ensureIndices(Player player) {
+        // Idempotently ensure lookup keys exist
+        valueCommands.set("player:email:" + player.getEmail(), player.getId());
+        valueCommands.set("player:username:" + player.getUsername(), player.getId());
     }
 
     public void saveRefreshToken(String token, String playerId) {
