@@ -83,4 +83,20 @@ public class AuthResource {
     public Response refresh(RefreshRequest req) {
         return Response.ok(authService.refresh(req)).build();
     }
+
+    @POST
+    @Path("/forgot-password")
+    @PermitAll
+    public Response forgotPassword(com.web.model.ForgotPasswordRequest req) {
+        authService.forgotPassword(req);
+        return Response.ok().build();
+    }
+
+    @POST
+    @Path("/reset-password")
+    @PermitAll
+    public Response resetPassword(com.web.model.ResetPasswordRequest req) {
+        authService.resetPassword(req);
+        return Response.ok().build();
+    }
 }

@@ -90,4 +90,19 @@ public class PlayerRepository {
     public void deleteRefreshToken(String token) {
         keyCommands.del("refresh_token:" + token);
     }
+
+    public void saveResetToken(String token, String playerId) {
+        valueCommands.set("reset_token:" + token, playerId, new SetArgs().ex(900)); // 15 minutes
+    }
+
+    public String validateResetToken(String token) {
+        String playerId = valueCommands.get("reset_token:" + token);
+        if (playerId == null)
+            return null;
+        return playerId;
+    }
+
+    public void deleteResetToken(String token) {
+        keyCommands.del("reset_token:" + token);
+    }
 }

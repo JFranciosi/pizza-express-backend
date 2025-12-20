@@ -23,6 +23,9 @@ public class AuthService {
     @Inject
     TokenService tokenService;
 
+    @Inject
+    EmailService emailService;
+
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email)) {
             throw new BadRequestException("Email already in use");
@@ -138,5 +141,38 @@ public class AuthService {
 
         player.setEmail(newEmail);
         playerRepository.save(player);
+    }
+
+    public void forgotPassword(com.web.model.ForgotPasswordRequest req) {
+        Player player = playerRepository.findByEmail(req.email);
+        if (player == null) {
+            // Silently return to prevent enumeration, or throw based on policy.
+            // For UX we might want to just say "If email exists..."
+            return;
+        }
+
+        String token = UUID.randomUUID().toString();
+        playerRepository.saveResetToken(token, player.getId());
+
+        String resetLink = "http://localhost:4200/reset-password?token=" + token;
+        emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+    }
+
+    public void resetPassword(com.web.model.ResetPasswordRequest req) {
+        String playerId = playerRepository.validateResetToken(req.token);
+        if (playerId == null) {
+            throw new BadRequestException("Invalid or expired token");
+        }
+
+        Player player = playerRepository.findById(playerId);
+        if (player == null) {
+            throw new BadRequestException("User not found");
+        }
+
+        String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword.toCharArray());
+        player.setPasswordHash(newHashed);
+        playerRepository.save(player);
+
+        playerRepository.deleteResetToken(req.token);
     }
 }
