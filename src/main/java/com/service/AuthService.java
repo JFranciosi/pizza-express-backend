@@ -23,9 +23,15 @@ public class AuthService {
     @Inject
     TokenService tokenService;
 
+    @Inject
+    EmailService emailService;
+
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email)) {
             throw new BadRequestException("Email already in use");
+        }
+        if (playerRepository.existsByUsername(req.username)) {
+            throw new BadRequestException("Username already in use");
         }
 
         String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password.toCharArray());
@@ -58,6 +64,9 @@ public class AuthService {
             throw new NotAuthorizedException("Invalid credentials");
         }
 
+        // Self-heal: ensure lookup keys exist for legacy users
+        playerRepository.ensureIndices(player);
+
         String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
@@ -86,5 +95,84 @@ public class AuthService {
 
         return new AuthResponse(accessToken, newRefreshToken, player.getId(), player.getUsername(), player.getEmail(),
                 player.getBalance());
+    }
+
+    public void changePassword(String userId, String oldPass, String newPass) {
+        Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new NotAuthorizedException("User not found");
+        }
+
+        BCrypt.Result result = BCrypt.verifyer().verify(oldPass.toCharArray(), player.getPasswordHash());
+        if (!result.verified) {
+            throw new BadRequestException("Incorrect old password");
+        }
+
+        String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
+        player.setPasswordHash(newHashed);
+        playerRepository.save(player);
+    }
+
+    public void updateEmail(String userId, String newEmail, String password) {
+        Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new NotAuthorizedException("User not found");
+        }
+
+        // Verify password
+        if (password == null || password.isEmpty()) {
+            throw new BadRequestException("Password required");
+        }
+        BCrypt.Result result = BCrypt.verifyer().verify(password.toCharArray(), player.getPasswordHash());
+        if (!result.verified) {
+            throw new BadRequestException("Invalid password");
+        }
+
+        if (player.getEmail().equals(newEmail)) {
+            return; // No changes
+        }
+
+        if (playerRepository.existsByEmail(newEmail)) {
+            throw new BadRequestException("Email already in use");
+        }
+
+        // Clean up old email lookup
+        playerRepository.removeLookups(player.getEmail(), null);
+
+        player.setEmail(newEmail);
+        playerRepository.save(player);
+    }
+
+    public void forgotPassword(com.web.model.ForgotPasswordRequest req) {
+        Player player = playerRepository.findByEmail(req.email);
+        if (player == null) {
+            // Silently return to prevent enumeration, or throw based on policy.
+            // For UX we might want to just say "If email exists..."
+            return;
+        }
+
+        String token = UUID.randomUUID().toString();
+        playerRepository.saveResetToken(token, player.getId());
+
+        String resetLink = "http://localhost:4200/reset-password?token=" + token;
+        emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+    }
+
+    public void resetPassword(com.web.model.ResetPasswordRequest req) {
+        String playerId = playerRepository.validateResetToken(req.token);
+        if (playerId == null) {
+            throw new BadRequestException("Invalid or expired token");
+        }
+
+        Player player = playerRepository.findById(playerId);
+        if (player == null) {
+            throw new BadRequestException("User not found");
+        }
+
+        String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword.toCharArray());
+        player.setPasswordHash(newHashed);
+        playerRepository.save(player);
+
+        playerRepository.deleteResetToken(req.token);
     }
 }

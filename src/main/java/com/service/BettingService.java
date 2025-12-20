@@ -27,60 +27,147 @@ public class BettingService {
     @Inject
     GameEngineService gameEngine;
 
-    private double round(double value) {
-        return Math.round(value * 100.0) / 100.0;
+    // Cache locker per utente per evitare race conditions sul saldo
+    private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
+
+    // Helper per ottenere il lock per un utente
+    private Object getUserLock(String userId) {
+        return userLocks.computeIfAbsent(userId, k -> new Object());
     }
 
-    public void placeBet(String userId, String username, double amount, double autoCashout) {
+    // Helper per generare la chiave composta (userId:index)
+    private String getBetKey(String userId, int index) {
+        return userId + ":" + index;
+    }
+
+    public void placeBet(String userId, String username, double amount, double autoCashout, int index) {
         Game game = gameEngine.getCurrentGame();
 
-        // 1. Validazioni preliminari (Fail fast)
+        // 1. Validazioni preliminari
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException(
                     "Non puoi scommettere ora. Il gioco è " + (game != null ? game.getStatus() : "null"));
         }
-        if (amount <= 0) {
-            throw new IllegalArgumentException("L'importo deve essere positivo");
-        }
-        if (amount < 0.10) {
+        if (amount <= 0 || amount < 0.10) {
             throw new IllegalArgumentException("L'importo minimo è 0.10€");
         }
         if (amount > 100) {
             throw new IllegalArgumentException("L'importo massimo è 100€");
         }
 
+        String betKey = getBetKey(userId, index);
+
         // 2. Atomic check-and-act
-        currentRoundBets.compute(userId, (key, existingBet) -> {
+        currentRoundBets.compute(betKey, (key, existingBet) -> {
             if (existingBet != null) {
-                throw new IllegalStateException("Hai già piazzato una scommessa per questo round");
+                throw new IllegalStateException("Hai già piazzato questa scommessa (" + index + ")");
             }
 
-            // Controllo saldo e prelievo reale
-            com.model.Player player = playerRepository.findById(userId);
-            if (player == null) {
-                throw new IllegalStateException("Utente non trovato");
+            // CRITICO: Lock per utente per evitare race condition sul saldo
+            synchronized (getUserLock(userId)) {
+                com.model.Player player = playerRepository.findById(userId);
+                if (player == null)
+                    throw new IllegalStateException("Utente non trovato");
+                if (player.getBalance() < amount)
+                    throw new IllegalStateException("Saldo insufficiente");
+
+                double finalAmount = round(amount);
+                double newBalance = round(player.getBalance() - finalAmount);
+
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+
+                // Auto-Refill Logic: Track zero balance
+                if (player.getBalance() < 0.10) {
+                    playerRepository.markZeroBalance(userId);
+                }
+
+                LOG.info("Prelievo " + finalAmount + " per " + username + " (Bet " + index + "). Nuovo saldo: "
+                        + player.getBalance());
             }
-            if (player.getBalance() < amount) {
-                throw new IllegalStateException("Saldo insufficiente");
-            }
 
-            // Arrotondamento
-            double finalAmount = round(amount);
-            double newBalance = round(player.getBalance() - finalAmount);
-
-            player.setBalance(newBalance);
-            playerRepository.save(player);
-
-            LOG.info("Prelievo di " + finalAmount + " per l'utente " + username + ". Nuovo saldo: "
-                    + player.getBalance());
-
-            Bet bet = new Bet(userId, username, game.getId(), finalAmount);
+            Bet bet = new Bet(userId, username, game.getId(), round(amount), index);
             bet.setAutoCashout(autoCashout);
             return bet;
         });
 
-        LOG.info("Scommessa piazzata: " + username + " - " + amount + "€ (Auto: " + autoCashout + "x)");
-        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount);
+        LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
+        // Broadcast deve includere l'index per distinguerle nel frontend
+        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index);
+    }
+
+    public CashOutResult cashOut(String userId, int index) {
+        return cashOut(userId, index, null);
+    }
+
+    public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
+        Game game = gameEngine.getCurrentGame();
+        // Se targetMultiplier è specificato (auto-cashout), permettiamo anche se il
+        // gioco sta tecnicamente crashando/finendo
+        // ma controlliamo che il moltiplicatore raggiunto sia sufficiente
+        if (game == null) {
+            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
+        }
+
+        // Se è manuale, deve essere FLYING. Se è auto, potrebbe essere appena crashato
+        // ma il check è avvenuto prima?
+        // Per sicurezza manteniamo il check su FLYING o checkiamo se il crash point >
+        // target
+        if (game.getStatus() != GameState.FLYING && targetMultiplier == null) {
+            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
+        }
+
+        String betKey = getBetKey(userId, index);
+        Bet bet = currentRoundBets.get(betKey);
+
+        if (bet == null)
+            throw new IllegalStateException("Nessuna scommessa attiva trovata (Index " + index + ")");
+        if (bet.getCashOutMultiplier() > 0)
+            throw new IllegalStateException("Hai già incassato questa scommessa!");
+
+        double currentMultiplier;
+        if (targetMultiplier != null) {
+            // Auto-cashout: usiamo il target fissato
+            // Verifichiamo per sicurezza che il gioco abbia effettivamente raggiunto quel
+            // punto
+            // (anche se checkAutoCashouts lo fa già)
+            if (game.getMultiplier() < targetMultiplier && game.getStatus() == GameState.FLYING) {
+                // Caso raro: race condition dove il multiplier è tornato indietro (impossibile)
+                // o non aggiornato
+                // Ci fidiamo del chiamante checkAutoCashouts che ha verificato la condizione
+            }
+            currentMultiplier = targetMultiplier;
+        } else {
+            // Manual cashout: usiamo il valore live
+            currentMultiplier = game.getMultiplier();
+        }
+
+        double winAmount = round(bet.getAmount() * currentMultiplier);
+
+        bet.setCashOutMultiplier(currentMultiplier);
+        bet.setProfit(round(winAmount - bet.getAmount()));
+
+        // CRITICO: Lock per utente per aggiornare saldo
+        synchronized (getUserLock(userId)) {
+            com.model.Player player = playerRepository.findById(userId);
+            if (player != null) {
+                double newBalance = round(player.getBalance() + winAmount);
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+
+                // Auto-Refill Logic: Clear zero balance status
+                if (player.getBalance() > 0) {
+                    playerRepository.clearZeroBalance(userId);
+                }
+
+                LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + currentMultiplier
+                        + "x). Nuovo saldo: "
+                        + player.getBalance());
+                gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount + ":" + index);
+                return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
+            }
+        }
+        throw new IllegalStateException("Utente non trovato");
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
@@ -88,54 +175,57 @@ public class BettingService {
             if (bet.getCashOutMultiplier() == 0 && bet.getAutoCashout() > 1.00
                     && currentMultiplier >= bet.getAutoCashout()) {
                 try {
-                    cashOut(bet.getUserId());
-                    LOG.info("AUTO-CASHOUT eseguito per " + bet.getUsername() + " a " + currentMultiplier + "x");
+                    // Passa l'index e il valore ESATTO dell'auto-cashout come target
+                    cashOut(bet.getUserId(), bet.getIndex(), bet.getAutoCashout());
+                    LOG.info("AUTO-CASHOUT per " + bet.getUsername() + " [" + bet.getIndex() + "] a "
+                            + bet.getAutoCashout() + "x (preciso)");
                 } catch (Exception e) {
-                    LOG.error("Errore durante auto-cashout per " + bet.getUsername(), e);
+                    LOG.error("Errore autocashout " + bet.getUsername(), e);
                 }
             }
         });
     }
 
-    public CashOutResult cashOut(String userId) {
+    public void cancelBet(String userId, int index) {
         Game game = gameEngine.getCurrentGame();
-
-        // 1. Validazioni
-        if (game == null || game.getStatus() != GameState.FLYING) {
-            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
+        if (game == null || game.getStatus() != GameState.WAITING) {
+            throw new IllegalStateException("Non puoi cancellare la scommessa ora.");
         }
 
-        Bet bet = currentRoundBets.get(userId);
-        if (bet == null) {
-            throw new IllegalStateException("Nessuna scommessa attiva trovata per questo utente.");
-        }
-        if (bet.getCashOutMultiplier() > 0) {
-            throw new IllegalStateException("Hai già incassato!");
-        }
+        String betKey = getBetKey(userId, index);
+        Bet bet = currentRoundBets.get(betKey);
 
-        // 2. Calcolo vincita
-        double currentMultiplier = game.getMultiplier();
-        double winAmount = round(bet.getAmount() * currentMultiplier);
-        double profit = round(winAmount - bet.getAmount());
+        if (bet == null)
+            throw new IllegalStateException("Nessuna scommessa da cancellare (Index " + index + ")");
 
-        // 3. Aggiorna stato scommessa
-        bet.setCashOutMultiplier(currentMultiplier);
-        bet.setProfit(profit);
+        currentRoundBets.remove(betKey);
 
-        // 4. Accredito vincita reale
-        com.model.Player player = playerRepository.findById(userId);
-        if (player != null) {
-            double newBalance = round(player.getBalance() + winAmount);
-            player.setBalance(newBalance);
-            playerRepository.save(player);
-            LOG.info("CASHOUT SUCCESSO! " + userId + " vince " + String.format("%.2f", winAmount) + "€ ("
-                    + currentMultiplier + "x). Nuovo saldo: " + player.getBalance());
-            gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount);
-            return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
-        } else {
-            LOG.error("Impossibile accreditare vincita, utente non trovato: " + userId);
-            throw new IllegalStateException("Utente non trovato");
+        // CRITICO: Lock per utente per rimborso
+        synchronized (getUserLock(userId)) {
+            com.model.Player player = playerRepository.findById(userId);
+            if (player != null) {
+                double newBalance = round(player.getBalance() + bet.getAmount());
+                player.setBalance(newBalance);
+                playerRepository.save(player);
+
+                // Auto-Refill Logic: Clear zero balance status
+                playerRepository.clearZeroBalance(userId);
+
+                LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
+                gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
+            }
         }
+    }
+
+    public List<Bet> resetBetsForNewRound() {
+        // Ritorna le scommesse del round appena finito per archivio/storico
+        List<Bet> oldBets = currentRoundBets.values().stream().collect(Collectors.toList());
+        currentRoundBets.clear();
+        return oldBets;
+    }
+
+    private double round(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     public static class CashOutResult {
@@ -148,40 +238,6 @@ public class BettingService {
             this.newBalance = newBalance;
             this.multiplier = multiplier;
         }
-    }
-
-    public void cancelBet(String userId) {
-        Game game = gameEngine.getCurrentGame();
-
-        // 1. Validazioni
-        if (game == null || game.getStatus() != GameState.WAITING) {
-            throw new IllegalStateException("Non puoi cancellare la scommessa ora. Il gioco è già partito.");
-        }
-
-        Bet bet = currentRoundBets.get(userId);
-        if (bet == null) {
-            throw new IllegalStateException("Nessuna scommessa da cancellare.");
-        }
-
-        // 2. Rimozione e rimborso
-        currentRoundBets.remove(userId);
-
-        com.model.Player player = playerRepository.findById(userId);
-        if (player != null) {
-            double newBalance = round(player.getBalance() + bet.getAmount());
-            player.setBalance(newBalance);
-            playerRepository.save(player);
-            LOG.info("Scommessa cancellata per " + userId + ". Rimborso: " + bet.getAmount() + "€. Nuovo saldo: "
-                    + player.getBalance());
-            gameEngine.broadcast("CANCEL_BET:" + userId);
-        }
-    }
-
-    public List<Bet> resetBetsForNewRound() {
-        // Ritorna le scommesse del round appena finito per archivio/storico
-        List<Bet> oldBets = currentRoundBets.values().stream().collect(Collectors.toList());
-        currentRoundBets.clear();
-        return oldBets;
     }
 
     public Map<String, Bet> getCurrentBets() {

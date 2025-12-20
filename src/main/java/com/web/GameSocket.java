@@ -1,6 +1,5 @@
 package com.web;
 
-import com.model.Bet;
 import com.model.Game;
 import com.service.BettingService;
 import com.service.GameEngineService;
@@ -11,9 +10,6 @@ import io.quarkus.websockets.next.WebSocket;
 import io.quarkus.websockets.next.WebSocketConnection;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -75,8 +71,9 @@ public class GameSocket {
         try {
             if (message.startsWith("BET:")) {
                 String[] parts = message.split(":");
+                // BET:userId:username:amount:index (optional)
                 if (parts.length < 4) {
-                    connection.sendText("ERROR:Formato scommessa errato. Usa BET:userId:username:amount")
+                    connection.sendText("ERROR:Formato scommessa errato. Usa BET:userId:username:amount[:index]")
                             .subscribe().with(v -> {
                             }, t -> LOG.error("Errore invio errore", t));
                     return;
@@ -84,9 +81,10 @@ public class GameSocket {
                 String userId = parts[1];
                 String username = parts[2];
                 double amount = Double.parseDouble(parts[3]);
+                int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
                 vertx.executeBlocking(() -> {
-                    bettingService.placeBet(userId, username, amount, 0.0);
+                    bettingService.placeBet(userId, username, amount, 0.0, index);
                     return null;
                 }).onSuccess(res -> {
                     connection.sendText("BET_OK:" + amount)
@@ -102,10 +100,12 @@ public class GameSocket {
 
             } else if (message.startsWith("CASHOUT:")) {
                 String[] parts = message.split(":");
+                // CASHOUT:userId:index (optional)
                 String userId = parts[1];
+                int index = (parts.length > 2) ? Integer.parseInt(parts[2]) : 0;
 
                 vertx.executeBlocking(() -> {
-                    bettingService.cashOut(userId);
+                    bettingService.cashOut(userId, index);
                     return null;
                 }).onSuccess(res -> {
                     connection.sendText("CASHOUT_OK")

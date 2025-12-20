@@ -214,8 +214,8 @@ public class GameEngineService {
 
         if (multiplier < 1.00)
             multiplier = 1.00;
-        if (multiplier > 100.00)
-            multiplier = 100.00;
+        if (multiplier > 100000.00)
+            multiplier = 100000.00;
 
         BigDecimal bd = new BigDecimal(multiplier).setScale(2, RoundingMode.FLOOR);
         return bd.doubleValue();
@@ -249,11 +249,13 @@ public class GameEngineService {
     }
 
     public io.smallrye.mutiny.Uni<java.util.List<String>> getHistory() {
-        return listCommands.lrange("game:history", 0, 9);
+        return listCommands.lrange("game:history", 0, 199);
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory() {
-        return listCommands.lrange("game:history", 0, 49);
+    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
+        // Limit max to 200 as per ltrim
+        int max = Math.min(limit, 200);
+        return listCommands.lrange("game:history", 0, max - 1);
     }
 
     public void broadcast(String message) {

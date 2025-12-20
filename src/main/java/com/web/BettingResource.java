@@ -21,6 +21,7 @@ public class BettingResource {
     public static class BetRequest {
         public double amount;
         public double autoCashout;
+        public int index; // 0 or 1
     }
 
     @POST
@@ -29,7 +30,9 @@ public class BettingResource {
         try {
             String userId = tokenService.getUserIdFromToken(token);
             String username = tokenService.getUsernameFromToken(token);
-            bettingService.placeBet(userId, username, req.amount, req.autoCashout);
+            // Default index 0 if not provided
+            int betIndex = (req.index == 1) ? 1 : 0;
+            bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex);
             return Response.ok().build();
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
@@ -40,10 +43,11 @@ public class BettingResource {
 
     @POST
     @Path("/cashout")
-    public Response cashOut(@HeaderParam("Authorization") String token) {
+    public Response cashOut(@HeaderParam("Authorization") String token, @QueryParam("index") Integer index) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
-            BettingService.CashOutResult result = bettingService.cashOut(userId);
+            int betIndex = (index != null && index == 1) ? 1 : 0;
+            BettingService.CashOutResult result = bettingService.cashOut(userId, betIndex);
             return Response.ok(result).build();
         } catch (IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
@@ -54,10 +58,11 @@ public class BettingResource {
 
     @POST
     @Path("/cancel")
-    public Response cancelBet(@HeaderParam("Authorization") String token) {
+    public Response cancelBet(@HeaderParam("Authorization") String token, @QueryParam("index") Integer index) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
-            bettingService.cancelBet(userId);
+            int betIndex = (index != null && index == 1) ? 1 : 0;
+            bettingService.cancelBet(userId, betIndex);
             return Response.ok().build();
         } catch (IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();

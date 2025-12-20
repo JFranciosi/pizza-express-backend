@@ -18,8 +18,50 @@ import jakarta.ws.rs.core.Response;
 @Consumes(MediaType.APPLICATION_JSON)
 public class AuthResource {
 
+    public static class ChangePasswordRequest {
+        public String userId; // Optional if passed via token, but frontend sends body
+        public String oldPass;
+        public String newPass;
+    }
+
+    public static class UpdateProfileRequest {
+        public String email;
+        public String password;
+    }
+
     @Inject
     AuthService authService;
+
+    @Inject
+    com.service.TokenService tokenService;
+
+    @POST
+    @Path("/change-password")
+    public Response changePassword(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+            ChangePasswordRequest req) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+            authService.changePassword(userId, req.oldPass, req.newPass);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
+    }
+
+    @POST
+    @Path("/update-profile")
+    public Response updateProfile(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+            UpdateProfileRequest req) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+            authService.updateEmail(userId, req.email, req.password);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
+    }
 
     @POST
     @Path("/register")
@@ -40,5 +82,21 @@ public class AuthResource {
     @PermitAll
     public Response refresh(RefreshRequest req) {
         return Response.ok(authService.refresh(req)).build();
+    }
+
+    @POST
+    @Path("/forgot-password")
+    @PermitAll
+    public Response forgotPassword(com.web.model.ForgotPasswordRequest req) {
+        authService.forgotPassword(req);
+        return Response.ok().build();
+    }
+
+    @POST
+    @Path("/reset-password")
+    @PermitAll
+    public Response resetPassword(com.web.model.ResetPasswordRequest req) {
+        authService.resetPassword(req);
+        return Response.ok().build();
     }
 }
