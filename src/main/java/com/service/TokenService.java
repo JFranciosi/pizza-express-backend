@@ -9,14 +9,21 @@ import java.util.Set;
 @ApplicationScoped
 public class TokenService {
 
+    @jakarta.inject.Inject
+    CryptoService cryptoService;
+
     public String generateAccessToken(String email, String username, String userId) {
-        return Jwt.issuer("https://pizza-express.com/issuer")
-                .upn(email)
-                .claim("username", username)
-                .groups(Set.of("User"))
-                .claim("userId", userId)
-                .expiresIn(3600) // 1 hour
-                .sign();
+        try {
+            return Jwt.issuer("https://pizza-express.com/issuer")
+                    .upn(email)
+                    .claim("username", username)
+                    .groups(Set.of("User"))
+                    .claim("userId", userId)
+                    .expiresIn(3600) // 1 hour
+                    .sign(cryptoService.getPrivateKey());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to sign JWT token", e);
+        }
     }
 
     public String generateRefreshToken() {
