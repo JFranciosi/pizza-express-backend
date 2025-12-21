@@ -1,63 +1,85 @@
 # Pizza Express Backend 🍕🚀
 
-Backend for the **Pizza Express** Crash Game, built with **Quarkus**.
-This service manages the real-time game logic, user authentication, and betting system.
+The backend engine for the **Pizza Express** Crash Game, built with **Quarkus** and **Redis**.
+It handles real-time game logic, multiplayer WebSocket synchronization, and provably fair RNG.
 
 ## 🌟 Features
 
-- **Crash Game Engine**: Real-time multiplier generation using a secure hash-chain algorithm (Fair & Verifiable).
-- **Real-Time Communication**: WebSocket endpoint (`/game`) for broadcasting game state (Multiplier, Time Left).
-- **Authentication**: JWT-based Auth with `TokenService`. New users start with **500€**.
+- **Real-Time Game Engine**:
+  - `GameEngineService`: Manages game states (`WAITING`, `FLYING`, `CRASHED`).
+  - **Crash Logic**: Exponential multiplier growth curve.
+  - **Provably Fair**: SHA-256 hash generation for every round.
+- **WebSocket Broadcast**:
+  - Pushes updates (`TICK`, `START`, `CRASH`) to all connected clients.
 - **Betting System**:
-  - **Place Bet**: `POST /bet/place` (Min 0.10€, Max 100€).
-  - **Cancel Bet**: `POST /bet/cancel` (Only in `WAITING` phase). Atomic refund.
-  - **Cash Out**: `POST /bet/cashout` (Returns authoritative win amount/balance).
-  - **Race Condition Protection**: Atomic transactions ensure balance integrity.
-- **Persistence**: Redis for fast game state management and H2/PostgreSQL for user data.
+  - Atomic bet placement allowing high-concurrency.
+  - **Auto-Cashout**: Automatically cashes out when target is reached.
+- **Auto-Refill**:
+  - Automatically refills user balance to 500€ if they stay at 0€ for 24 hours.
+  - Scheduler runs every **1 minute** to check eligibility.
+- **Redis Integration**:
+  - `game:current`, `game:history`, `player:*` keys for state persistence.
+  - **Redis ZSET** based refill queue (`player:zero_balance`).
 
 ## 🛠️ Tech Stack
 
-- **Java 17+**
+- **Java 21**
 - **Quarkus**: Supersonic Subatomic Java Framework.
-- **Vert.x**: For reactive WebSockets and event loops.
-- **Hibernate ORM / Panache**: Data persistence.
-- **Lombok**: For boilerplate code reduction.
+- **Redis (Valkey)**: Primary database for state and high-speed transactions.
+- **Vert.x**: Event loop and reactive messaging.
+- **Undertow**: WebSocket server.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- JDK 17+
-- Maven 3.8+
+- Java 21+
+- Maven 3.9+
+- Redis (running on `localhost:6379` or via Docker)
 
-### Running the Application
+### Running Locally
 
-```shell
-./mvnw quarkus:dev
+1. Start Redis:
+   ```bash
+   docker run --name redis -p 6379:6379 -d redis
+   ```
+
+2. Start the application in dev mode:
+   ```bash
+   ./mvnw quarkus:dev
+   ```
+
+3. The API will be available at `http://localhost:8080`.
+
+## ⚙️ Configuration
+
+The application is configured via `application.properties` or Environment Variables (recommended for production).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REDIS_HOST` | Redis Host address | `localhost` |
+| `REDIS_PASSWORD` | Redis Password | *Required in prod* |
+| `CORS_ORIGINS` | Allowed Frontend URLs | `http://localhost:4200` |
+| `GMAIL_USER` | Email for sending resets | - |
+| `GMAIL_PASSWORD` | App Password for Gmail | - |
+
+## ☁️ Deployment (Azure)
+
+This project is deployed on **Azure App Service**.
+
+**Important Configuration on Azure**:
+Ensure you set the `CORS_ORIGINS` environment variable to your frontend domain (e.g., `https://your-netlify-app.netlify.app`) to allow cross-origin requests.
+
+## 🔧 Debug Tools
+
+### Auto-Refill Force Scan
+Trigger a manual scan of all users to backfill the auto-refill queue:
+```bash
+POST /game/debug/check-all-balances
 ```
 
-The application will start on `http://localhost:8080`.
-
-### API Endpoints
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Register new user (500€ Bonus) | ❌ |
-| `POST` | `/auth/login` | Login and get JWT | ❌ |
-| `POST` | `/bet/place` | Place a bet (Amount: 0.10 - 100) | ✅ |
-| `POST` | `/bet/cancel` | Cancel active bet (In Waiting Phase) | ✅ |
-| `POST` | `/bet/cashout` | Cash out current bet | ✅ |
-| `WS` | `/game` | WebSocket for Game Stream | ❌ |
-
-## 🧪 Testing
-
-Run unit and integration tests:
-
-```shell
-./mvnw test
+### Force Zero Balance (Test)
+Manually set a user to 0 to trigger refill logic:
+```bash
+POST /game/debug/force-zero/{userId}
 ```
-
-## 🔒 Security Notes
-
-- **Decimal Precision**: All monetary values are strictly rounded to 2 decimal places.
-- **Concurrency**: Betting actions use atomic locks (`ConcurrentHashMap.compute`) to prevent double-spending race conditions.
