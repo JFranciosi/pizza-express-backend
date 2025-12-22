@@ -27,7 +27,7 @@ public class CryptoService {
         String privateKeyPEM = realPem
                 .replace("-----BEGIN PRIVATE KEY-----", "")
                 .replace("-----END PRIVATE KEY-----", "")
-                .replaceAll("\\s", ""); // Rimuove spazi e newlines rimasti
+                .replaceAll("[^A-Za-z0-9+/=]", ""); // Rimuove QUALSIASI carattere non valido per Base64
 
         byte[] encoded = Base64.getDecoder().decode(privateKeyPEM);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
