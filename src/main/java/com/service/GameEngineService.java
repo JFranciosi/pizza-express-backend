@@ -19,6 +19,7 @@ public class GameEngineService {
 
     private Game currentGame;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private boolean startingNewRound = false;
 
     // Configurazione gioco
     private static final long WAITING_TIME_MS = 10000; // 10 secondi di attesa
@@ -33,6 +34,9 @@ public class GameEngineService {
 
     @Inject
     BettingService bettingService;
+
+    @Inject
+    ProvablyFairService provablyFairService; // [NEW]
 
     @Inject
     io.vertx.core.Vertx vertx;
@@ -61,28 +65,41 @@ public class GameEngineService {
     }
 
     private void startNewRound() {
-        currentGame = new Game();
-        currentGame.setId(UUID.randomUUID().toString());
-        currentGame.setStatus(GameState.WAITING);
-        currentGame.setMultiplier(1.00);
-        double crashPoint = generateCrashPoint();
-        currentGame.setCrashPoint(crashPoint);
+        if (startingNewRound)
+            return;
+        startingNewRound = true;
 
-        // Provably Fair: Genera secret e hash
-        String secret = UUID.randomUUID().toString();
-        String hash = generateHash(secret, crashPoint);
-        currentGame.setSecret(secret);
-        currentGame.setHash(hash);
+        provablyFairService.popNextHash()
+                .subscribe().with(gameSeed -> {
+                    currentGame = new Game();
+                    currentGame.setId(UUID.randomUUID().toString());
+                    currentGame.setStatus(GameState.WAITING);
+                    currentGame.setMultiplier(1.00);
 
-        currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
+                    double crashPoint = provablyFairService.calculateCrashPoint(gameSeed);
 
-        bettingService.resetBetsForNewRound();
-        saveGameToRedis();
+                    currentGame.setCrashPoint(crashPoint);
+                    currentGame.setSecret(gameSeed);
+                    currentGame.setHash(provablyFairService.sha256(gameSeed));
 
-        LOG.info("Nuovo round creato: " + currentGame.getId()
-                + " - Hash: " + currentGame.getHash());
-        gameSocket.broadcast("STATE:WAITING");
-        gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
+                    currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
+
+                    bettingService.resetBetsForNewRound();
+                    saveGameToRedis();
+
+                    LOG.info("Nuovo round creato: " + currentGame.getId()
+                            + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
+
+                    // Broadcast info
+                    gameSocket.broadcast("STATE:WAITING");
+                    gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
+                    gameSocket.broadcast("HASH:" + currentGame.getHash());
+
+                    startingNewRound = false;
+                }, t -> {
+                    LOG.error("Failed to start new round", t);
+                    startingNewRound = false;
+                });
     }
 
     private long lastSecondsBroadcast = -1;
@@ -113,7 +130,7 @@ public class GameEngineService {
                 break;
 
             case CRASHED:
-                if (now >= roundStartTime + 1000) { // 3 secondi di pausa post-crash
+                if (now >= roundStartTime + 3000) { // Allungato a 3s per leggere risultato
                     startNewRound();
                 }
                 break;
@@ -145,13 +162,12 @@ public class GameEngineService {
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
         double currentMultiplier = bd.doubleValue();
 
+        // Check crash
+        // Nota: usiamo >= per crashare ESATTAMENTE al punto o appena superato
         if (currentMultiplier >= currentGame.getCrashPoint()) {
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
-            // Non salviamo su Redis ad ogni tick per evitare overhead eccessivo,
-            // ma se serve real-time per chi entra dopo, si può decommentare:
-            // saveGameToRedis();
 
             vertx.executeBlocking(() -> {
                 bettingService.checkAutoCashouts(currentMultiplier);
@@ -166,13 +182,14 @@ public class GameEngineService {
         currentGame.setStatus(GameState.CRASHED);
         currentGame.setMultiplier(finalMultiplier);
         running.set(false);
-        roundStartTime = System.currentTimeMillis(); // Reset timer per restart
+        roundStartTime = System.currentTimeMillis(); // Reset timer per restart logic
 
         saveGameToRedis();
         saveToHistory(finalMultiplier);
 
         LOG.info("CRASHED at " + finalMultiplier + "x 💥");
-        gameSocket.broadcast("CRASH:" + finalMultiplier);
+        // Reveal Secret (Seed) on Crash
+        gameSocket.broadcast("CRASH:" + finalMultiplier + ":" + currentGame.getSecret());
     }
 
     private void saveGameToRedis() {
@@ -181,13 +198,20 @@ public class GameEngineService {
         data.put("status", currentGame.getStatus().name());
         data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
         data.put("startTime", String.valueOf(currentGame.getStartTime()));
-        data.put("hash", currentGame.getHash());
+        if (currentGame.getHash() != null) {
+            data.put("hash", currentGame.getHash());
+        }
 
         if (currentGame.getStatus() == GameState.CRASHED) {
             data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
-            data.put("secret", currentGame.getSecret());
+            if (currentGame.getSecret() != null) {
+                data.put("secret", currentGame.getSecret());
+            } else {
+                data.put("secret", "Unknown");
+            }
         } else {
             data.put("crashPoint", "HIDDEN");
+            // Secret not sent
         }
 
         hashCommands.hset("game:current", data)
@@ -200,7 +224,9 @@ public class GameEngineService {
     }
 
     private void saveToHistory(double crashPoint) {
-        listCommands.lpush("game:history", String.valueOf(crashPoint))
+        // Save format: CrashPoint:Seed
+        String historyEntry = crashPoint + ":" + currentGame.getSecret();
+        listCommands.lpush("game:history", historyEntry)
                 .chain(v -> listCommands.ltrim("game:history", 0, 199))
                 .subscribe().with(v -> {
                 }, t -> {
@@ -210,44 +236,7 @@ public class GameEngineService {
                 });
     }
 
-    private double generateCrashPoint() {
-        double r = Math.random();
-        if (r < 0.03)
-            return 1.00;
-
-        double multiplier = 0.99 / (1 - r);
-
-        if (multiplier < 1.00)
-            multiplier = 1.00;
-        if (multiplier > 100000.00)
-            multiplier = 100000.00;
-
-        BigDecimal bd = new BigDecimal(multiplier).setScale(2, RoundingMode.FLOOR);
-        return bd.doubleValue();
-    }
-
-    private String generateHash(String secret, double crashPoint) {
-        try {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            String toHash = secret + ":" + crashPoint;
-            byte[] encodedhash = digest.digest(toHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return bytesToHex(encodedhash);
-        } catch (Exception e) {
-            throw new RuntimeException("Errore SHA-256", e);
-        }
-    }
-
-    private static String bytesToHex(byte[] hash) {
-        StringBuilder hexString = new StringBuilder(2 * hash.length);
-        for (int i = 0; i < hash.length; i++) {
-            String hex = Integer.toHexString(0xff & hash[i]);
-            if (hex.length() == 1) {
-                hexString.append('0');
-            }
-            hexString.append(hex);
-        }
-        return hexString.toString();
-    }
+    // Removed old RNG methods (generateCrashPoint, generateHash, bytesToHex)
 
     public Game getCurrentGame() {
         return currentGame;
@@ -258,7 +247,6 @@ public class GameEngineService {
     }
 
     public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
-        // Limit max to 200 as per ltrim
         int max = Math.min(limit, 200);
         return listCommands.lrange("game:history", 0, max - 1);
     }
