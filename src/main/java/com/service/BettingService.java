@@ -70,14 +70,33 @@ public class BettingService {
                 throw new IllegalStateException("Saldo insufficiente o errore transazione");
             }
 
-            Bet bet = new Bet(userId, username, game.getId(), finalAmount, index);
+            // Retrieve avatar URL using player repository explicitly if needed, or better,
+            // pass it?
+            // Since we only have userId/username here, we might need a quick lookup if we
+            // want avatar.
+            // Or we assume the client sends it? Client sending it is spoofable.
+            // Better to fetch player.
+            com.model.Player player = playerRepository.findById(userId);
+            String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
+
+            Bet bet = new Bet(userId, username, game.getId(), finalAmount, index, avatarUrl);
             bet.setAutoCashout(autoCashout);
             return bet;
         });
 
+        // Retrieve the created bet to get the avatarUrl (in case we want to be sure)
+        // actually we have it in the scope.
+        // We need to broadcast the avatarUrl too.
+        // Protocol: BET:userId:username:amount:index:avatarUrl
+        // Wait, existing protocol is position based.
+        // Let's modify broadcast to include it at the end?
+
+        String avatarUrl = currentRoundBets.get(betKey).getAvatarUrl();
+        String safeAvatar = (avatarUrl == null) ? "" : avatarUrl;
+
         LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
-        // Broadcast deve includere l'index per distinguerle nel frontend
-        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index);
+        // Broadcast includes avatarUrl now
+        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + safeAvatar);
     }
 
     public CashOutResult cashOut(String userId, int index) {
@@ -195,7 +214,6 @@ public class BettingService {
     }
 
     public List<Bet> resetBetsForNewRound() {
-        // Ritorna le scommesse del round appena finito per archivio/storico
         List<Bet> oldBets = currentRoundBets.values().stream().collect(Collectors.toList());
         currentRoundBets.clear();
         return oldBets;

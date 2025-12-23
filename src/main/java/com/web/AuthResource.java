@@ -29,11 +29,19 @@ public class AuthResource {
         public String password;
     }
 
+    public static class AvatarUploadRequest {
+        @org.jboss.resteasy.reactive.RestForm("file")
+        public org.jboss.resteasy.reactive.multipart.FileUpload file;
+    }
+
     @Inject
     AuthService authService;
 
     @Inject
     com.service.TokenService tokenService;
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "app.frontend.url")
+    String frontendUrl;
 
     @POST
     @Path("/change-password")
@@ -58,6 +66,46 @@ public class AuthResource {
             authService.updateEmail(userId, req.email, req.password);
             return Response.ok().build();
         } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
+    }
+
+    @POST
+    @Path("/upload-avatar")
+    @Consumes(MediaType.MULTIPART_FORM_DATA)
+    public Response uploadAvatar(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+            AvatarUploadRequest req) {
+        try {
+            String userId = tokenService.getUserIdFromToken(token);
+
+            if (req.file == null) {
+                return Response.status(Response.Status.BAD_REQUEST).entity("File is required").build();
+            }
+
+            if (req.file.size() > 2 * 1024 * 1024) {
+                return Response.status(Response.Status.BAD_REQUEST).entity("File too large (max 2MB)").build();
+            }
+
+            byte[] fileBytes;
+            try (java.io.InputStream is = java.nio.file.Files.newInputStream(req.file.filePath())) {
+                fileBytes = is.readAllBytes();
+            }
+            String contentType = req.file.contentType();
+            if (contentType == null)
+                contentType = "image/jpeg";
+
+            String base64Img = java.util.Base64.getEncoder().encodeToString(fileBytes);
+            String avatarUrl = "data:" + contentType + ";base64," + base64Img;
+
+            authService.updateAvatar(userId, avatarUrl);
+            return Response.ok(new java.util.HashMap<String, String>() {
+                {
+                    put("avatarUrl", avatarUrl);
+                }
+            }).build();
+        } catch (Exception e) {
+            e.printStackTrace();
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
         }

@@ -54,7 +54,7 @@ public class AuthService {
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
         return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
-                player.getBalance());
+                player.getBalance(), player.getAvatarUrl());
     }
 
     public AuthResponse login(LoginRequest req) {
@@ -76,7 +76,7 @@ public class AuthService {
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
         return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
-                player.getBalance());
+                player.getBalance(), player.getAvatarUrl());
     }
 
     public AuthResponse refresh(RefreshRequest req) {
@@ -98,7 +98,7 @@ public class AuthService {
         playerRepository.saveRefreshToken(newRefreshToken, player.getId());
 
         return new AuthResponse(accessToken, newRefreshToken, player.getId(), player.getUsername(), player.getEmail(),
-                player.getBalance());
+                player.getBalance(), player.getAvatarUrl());
     }
 
     public void changePassword(String userId, String oldPass, String newPass) {
@@ -144,6 +144,15 @@ public class AuthService {
         playerRepository.removeLookups(player.getEmail(), null);
 
         player.setEmail(newEmail);
+        playerRepository.save(player);
+    }
+
+    public void updateAvatar(String userId, String avatarUrl) {
+        Player player = playerRepository.findById(userId);
+        if (player == null) {
+            throw new NotAuthorizedException("User not found");
+        }
+        player.setAvatarUrl(avatarUrl);
         playerRepository.save(player);
     }
 

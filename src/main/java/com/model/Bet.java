@@ -9,11 +9,12 @@ public class Bet {
     private double cashOutMultiplier;
     private int index;
     private double profit;
+    private String avatarUrl;
 
     public Bet() {
     }
 
-    public Bet(String userId, String username, String gameId, double amount, int index) {
+    public Bet(String userId, String username, String gameId, double amount, int index, String avatarUrl) {
         this.userId = userId;
         this.username = username;
         this.gameId = gameId;
@@ -21,6 +22,7 @@ public class Bet {
         this.index = index;
         this.cashOutMultiplier = 0.0;
         this.profit = 0.0;
+        this.avatarUrl = avatarUrl;
     }
 
     // Getter e Setter
@@ -38,6 +40,14 @@ public class Bet {
 
     public void setUsername(String username) {
         this.username = username;
+    }
+
+    public String getAvatarUrl() {
+        return avatarUrl;
+    }
+
+    public void setAvatarUrl(String avatarUrl) {
+        this.avatarUrl = avatarUrl;
     }
 
     public String getGameId() {
