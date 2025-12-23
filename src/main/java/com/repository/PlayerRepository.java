@@ -48,12 +48,17 @@ public class PlayerRepository {
 
     public void save(Player player) {
         String key = "player:" + player.getId();
-        hashCommands.hset(key, Map.of(
-                "id", player.getId(),
-                "username", player.getUsername(),
-                "email", player.getEmail(),
-                "password", player.getPasswordHash(),
-                "balance", String.valueOf(player.getBalance())));
+        java.util.Map<String, String> data = new java.util.HashMap<>();
+        data.put("id", player.getId());
+        data.put("username", player.getUsername());
+        data.put("email", player.getEmail());
+        data.put("password", player.getPasswordHash());
+        data.put("balance", String.valueOf(player.getBalance()));
+        if (player.getAvatarUrl() != null) {
+            data.put("avatarUrl", player.getAvatarUrl());
+        }
+
+        hashCommands.hset(key, data);
         valueCommands.set("player:email:" + player.getEmail(), player.getId());
         valueCommands.set("player:username:" + player.getUsername(), player.getId());
     }
@@ -70,12 +75,17 @@ public class PlayerRepository {
         if (data.isEmpty())
             return null;
 
-        return new Player(
+        Player player = new Player(
                 data.get("id"),
                 data.get("username"),
                 data.get("email"),
                 data.get("password"),
                 Double.parseDouble(data.get("balance")));
+
+        if (data.containsKey("avatarUrl")) {
+            player.setAvatarUrl(data.get("avatarUrl"));
+        }
+        return player;
     }
 
     public Player findByEmail(String email) {
