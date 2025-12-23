@@ -11,6 +11,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotAuthorizedException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.UUID;
 
@@ -25,6 +26,9 @@ public class AuthService {
 
     @Inject
     EmailService emailService;
+
+    @ConfigProperty(name = "app.frontend.url", defaultValue = "http://localhost:4200")
+    String frontendUrl;
 
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email)) {
@@ -154,7 +158,7 @@ public class AuthService {
         String token = UUID.randomUUID().toString();
         playerRepository.saveResetToken(token, player.getId());
 
-        String resetLink = "http://localhost:4200/reset-password?token=" + token;
+        String resetLink = frontendUrl + "/reset-password?token=" + token;
         emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
     }
 
