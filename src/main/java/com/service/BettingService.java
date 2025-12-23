@@ -92,11 +92,12 @@ public class BettingService {
         // Let's modify broadcast to include it at the end?
 
         String avatarUrl = currentRoundBets.get(betKey).getAvatarUrl();
-        String safeAvatar = (avatarUrl == null) ? "" : avatarUrl;
+        // Use the API URL if avatar exists
+        String avatarApiUrl = (avatarUrl != null && !avatarUrl.isEmpty()) ? "/users/" + userId + "/avatar" : "";
 
         LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
-        // Broadcast includes avatarUrl now
-        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + safeAvatar);
+        // Broadcast user URL
+        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
     public CashOutResult cashOut(String userId, int index) {
