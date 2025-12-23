@@ -19,7 +19,7 @@ import jakarta.ws.rs.core.Response;
 public class AuthResource {
 
     public static class ChangePasswordRequest {
-        public String userId; // Optional if passed via token, but frontend sends body
+        public String userId;
         public String oldPass;
         public String newPass;
     }
@@ -88,15 +88,25 @@ public class AuthResource {
     @Path("/forgot-password")
     @PermitAll
     public Response forgotPassword(com.web.model.ForgotPasswordRequest req) {
-        authService.forgotPassword(req);
-        return Response.ok().build();
+        try {
+            authService.forgotPassword(req);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
     }
 
     @POST
     @Path("/reset-password")
     @PermitAll
     public Response resetPassword(com.web.model.ResetPasswordRequest req) {
-        authService.resetPassword(req);
-        return Response.ok().build();
+        try {
+            authService.resetPassword(req);
+            return Response.ok().build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+        }
     }
 }
