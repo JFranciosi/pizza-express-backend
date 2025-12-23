@@ -4,12 +4,16 @@ import io.quarkus.mailer.Mail;
 import io.quarkus.mailer.Mailer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
 public class EmailService {
 
     @Inject
     Mailer mailer;
+
+    @ConfigProperty(name = "quarkus.mailer.from", defaultValue = "noreply@pizzaexpress.com")
+    String from;
 
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
         String subject = "Pizza Express - Password Reset";
@@ -19,6 +23,6 @@ public class EmailService {
                 "<a href=\"" + resetLink + "\">Reset Password</a>" +
                 "<p>If you did not request this, please ignore this email.</p>";
 
-        mailer.send(Mail.withHtml(toEmail, subject, body));
+        mailer.send(Mail.withHtml(toEmail, subject, body).setFrom(from));
     }
 }
