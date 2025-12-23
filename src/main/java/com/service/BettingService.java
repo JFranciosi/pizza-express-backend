@@ -27,13 +27,8 @@ public class BettingService {
     @Inject
     GameEngineService gameEngine;
 
-    // Cache locker per utente per evitare race conditions sul saldo
-    private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
-
-    // Helper per ottenere il lock per un utente
-    private Object getUserLock(String userId) {
-        return userLocks.computeIfAbsent(userId, k -> new Object());
-    }
+    @Inject
+    WalletService walletService; // [NEW] Seamless Wallet Injection
 
     // Helper per generare la chiave composta (userId:index)
     private String getBetKey(String userId, int index) {
@@ -63,30 +58,19 @@ public class BettingService {
                 throw new IllegalStateException("Hai già piazzato questa scommessa (" + index + ")");
             }
 
-            // CRITICO: Lock per utente per evitare race condition sul saldo
-            synchronized (getUserLock(userId)) {
-                com.model.Player player = playerRepository.findById(userId);
-                if (player == null)
-                    throw new IllegalStateException("Utente non trovato");
-                if (player.getBalance() < amount)
-                    throw new IllegalStateException("Saldo insufficiente");
+            double finalAmount = round(amount);
+            String txId = java.util.UUID.randomUUID().toString(); // [NEW] Idempotency Key
 
-                double finalAmount = round(amount);
-                double newBalance = round(player.getBalance() - finalAmount);
+            // [MODIFIED] Use WalletService to reserve funds
+            boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
 
-                player.setBalance(newBalance);
-                playerRepository.save(player);
-
-                // Auto-Refill Logic: Track zero balance
-                if (player.getBalance() < 0.10) {
-                    playerRepository.markZeroBalance(userId);
-                }
-
-                LOG.info("Prelievo " + finalAmount + " per " + username + " (Bet " + index + "). Nuovo saldo: "
-                        + player.getBalance());
+            if (!success) {
+                // Check specific reason? For now assume balance.
+                // We could check balance via walletService.getBalance(userId) if needed
+                throw new IllegalStateException("Saldo insufficiente o errore transazione");
             }
 
-            Bet bet = new Bet(userId, username, game.getId(), round(amount), index);
+            Bet bet = new Bet(userId, username, game.getId(), finalAmount, index);
             bet.setAutoCashout(autoCashout);
             return bet;
         });
@@ -125,49 +109,50 @@ public class BettingService {
         if (bet.getCashOutMultiplier() > 0)
             throw new IllegalStateException("Hai già incassato questa scommessa!");
 
-        double currentMultiplier;
-        if (targetMultiplier != null) {
-            // Auto-cashout: usiamo il target fissato
-            // Verifichiamo per sicurezza che il gioco abbia effettivamente raggiunto quel
-            // punto
-            // (anche se checkAutoCashouts lo fa già)
-            if (game.getMultiplier() < targetMultiplier && game.getStatus() == GameState.FLYING) {
-                // Caso raro: race condition dove il multiplier è tornato indietro (impossibile)
-                // o non aggiornato
-                // Ci fidiamo del chiamante checkAutoCashouts che ha verificato la condizione
-            }
-            currentMultiplier = targetMultiplier;
+        // [MODIFIED] Esecuzione immediata (istantanea)
+        if (targetMultiplier == null) {
+            // Manual Cashout: Execute IMMEDIATELY using current game multiplier
+            return executeCashoutLogically(userId, index, game.getMultiplier());
         } else {
-            // Manual cashout: usiamo il valore live
-            currentMultiplier = game.getMultiplier();
+            // Auto-Cashout: Executed by GameEngine loop
+            return executeCashoutLogically(userId, index, targetMultiplier);
         }
+    }
 
-        double winAmount = round(bet.getAmount() * currentMultiplier);
+    // [NEW] Called by GameEngineService in the main loop
 
-        bet.setCashOutMultiplier(currentMultiplier);
+    private synchronized CashOutResult executeCashoutLogically(String userId, int index, double multiplier) {
+        // The actual logic that was previously in cashOut
+        // ... (Reusing existing logic logic)
+
+        // Need to duplicate logic or refactor logic below...
+        // Let's copy the core logic here and make cashOut call this for AutoCashout.
+
+        String betKey = getBetKey(userId, index);
+        Bet bet = currentRoundBets.get(betKey);
+
+        if (bet == null || bet.getCashOutMultiplier() > 0)
+            return null; // Already cashed out or bet not found
+
+        double winAmount = round(bet.getAmount() * multiplier);
+
+        bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
 
-        // CRITICO: Lock per utente per aggiornare saldo
-        synchronized (getUserLock(userId)) {
-            com.model.Player player = playerRepository.findById(userId);
-            if (player != null) {
-                double newBalance = round(player.getBalance() + winAmount);
-                player.setBalance(newBalance);
-                playerRepository.save(player);
+        String txId = java.util.UUID.randomUUID().toString();
+        boolean success = walletService.creditWinnings(userId, winAmount, gameEngine.getCurrentGame().getId(), txId);
 
-                // Auto-Refill Logic: Clear zero balance status
-                if (player.getBalance() > 0) {
-                    playerRepository.clearZeroBalance(userId);
-                }
-
-                LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + currentMultiplier
-                        + "x). Nuovo saldo: "
-                        + player.getBalance());
-                gameEngine.broadcast("CASHOUT:" + userId + ":" + currentMultiplier + ":" + winAmount + ":" + index);
-                return new CashOutResult(winAmount, player.getBalance(), currentMultiplier);
-            }
+        if (!success) {
+            LOG.error("CRITICAL: Failed to credit winnings for user " + userId);
         }
-        throw new IllegalStateException("Utente non trovato");
+
+        double newBalance = walletService.getBalance(userId);
+
+        LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + multiplier
+                + "x). Nuovo saldo: " + newBalance);
+
+        gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+        return new CashOutResult(winAmount, newBalance, multiplier);
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
@@ -200,21 +185,13 @@ public class BettingService {
 
         currentRoundBets.remove(betKey);
 
-        // CRITICO: Lock per utente per rimborso
-        synchronized (getUserLock(userId)) {
-            com.model.Player player = playerRepository.findById(userId);
-            if (player != null) {
-                double newBalance = round(player.getBalance() + bet.getAmount());
-                player.setBalance(newBalance);
-                playerRepository.save(player);
+        currentRoundBets.remove(betKey);
 
-                // Auto-Refill Logic: Clear zero balance status
-                playerRepository.clearZeroBalance(userId);
+        String txId = java.util.UUID.randomUUID().toString();
+        walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
-                LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
-                gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
-            }
-        }
+        LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
+        gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
     }
 
     public List<Bet> resetBetsForNewRound() {
