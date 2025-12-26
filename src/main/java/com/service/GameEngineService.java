@@ -54,8 +54,8 @@ public class GameEngineService {
     void init() {
         if (currentGame == null) {
             startNewRound();
-            // Avvia il loop di gioco ogni 100ms
-            timerId = vertx.setPeriodic(100, id -> gameLoop());
+            // Avvia il loop di gioco ogni 50ms (20 tick al secondo)
+            timerId = vertx.setPeriodic(50, id -> gameLoop());
         }
     }
 
