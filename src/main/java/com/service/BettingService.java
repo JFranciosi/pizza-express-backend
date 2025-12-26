@@ -159,6 +159,9 @@ public class BettingService {
         bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
 
+        // [Optimistic Broadcast] Notify client immediately before DB operation
+        gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+
         String txId = java.util.UUID.randomUUID().toString();
         boolean success = walletService.creditWinnings(userId, winAmount, gameEngine.getCurrentGame().getId(), txId);
 
@@ -171,7 +174,6 @@ public class BettingService {
         LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + multiplier
                 + "x). Nuovo saldo: " + newBalance);
 
-        gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
         return new CashOutResult(winAmount, newBalance, multiplier);
     }
 
