@@ -17,8 +17,6 @@ import java.util.stream.Collectors;
 public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
-
-    // Cache locale delle scommesse per il round corrente: UserId -> Bet
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
 
     @Inject
@@ -28,9 +26,8 @@ public class BettingService {
     GameEngineService gameEngine;
 
     @Inject
-    WalletService walletService; // [NEW] Seamless Wallet Injection
+    WalletService walletService;
 
-    // Helper per generare la chiave composta (userId:index)
     private String getBetKey(String userId, int index) {
         return userId + ":" + index;
     }
@@ -38,7 +35,6 @@ public class BettingService {
     public void placeBet(String userId, String username, double amount, double autoCashout, int index) {
         Game game = gameEngine.getCurrentGame();
 
-        // 1. Validazioni preliminari
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException(
                     "Non puoi scommettere ora. Il gioco è " + (game != null ? game.getStatus() : "null"));
@@ -49,10 +45,12 @@ public class BettingService {
         if (amount > 100) {
             throw new IllegalArgumentException("L'importo massimo è 100€");
         }
+        if (index < 0 || index > 1) {
+            throw new IllegalArgumentException("Index scommessa non valido (0-1)");
+        }
 
         String betKey = getBetKey(userId, index);
 
-        // 2. Atomic check-and-act
         currentRoundBets.compute(betKey, (key, existingBet) -> {
             if (existingBet != null) {
                 throw new IllegalStateException("Hai già piazzato questa scommessa (" + index + ")");
@@ -61,21 +59,10 @@ public class BettingService {
             double finalAmount = round(amount);
             String txId = java.util.UUID.randomUUID().toString(); // [NEW] Idempotency Key
 
-            // [MODIFIED] Use WalletService to reserve funds
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
-
             if (!success) {
-                // Check specific reason? For now assume balance.
-                // We could check balance via walletService.getBalance(userId) if needed
                 throw new IllegalStateException("Saldo insufficiente o errore transazione");
             }
-
-            // Retrieve avatar URL using player repository explicitly if needed, or better,
-            // pass it?
-            // Since we only have userId/username here, we might need a quick lookup if we
-            // want avatar.
-            // Or we assume the client sends it? Client sending it is spoofable.
-            // Better to fetch player.
             com.model.Player player = playerRepository.findById(userId);
             String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
 
@@ -84,19 +71,10 @@ public class BettingService {
             return bet;
         });
 
-        // Retrieve the created bet to get the avatarUrl (in case we want to be sure)
-        // actually we have it in the scope.
-        // We need to broadcast the avatarUrl too.
-        // Protocol: BET:userId:username:amount:index:avatarUrl
-        // Wait, existing protocol is position based.
-        // Let's modify broadcast to include it at the end?
-
         String avatarUrl = currentRoundBets.get(betKey).getAvatarUrl();
-        // Use the API URL if avatar exists
         String avatarApiUrl = (avatarUrl != null && !avatarUrl.isEmpty()) ? "/users/" + userId + "/avatar" : "";
 
         LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
-        // Broadcast user URL
         gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
@@ -106,17 +84,10 @@ public class BettingService {
 
     public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
         Game game = gameEngine.getCurrentGame();
-        // Se targetMultiplier è specificato (auto-cashout), permettiamo anche se il
-        // gioco sta tecnicamente crashando/finendo
-        // ma controlliamo che il moltiplicatore raggiunto sia sufficiente
         if (game == null) {
             throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
         }
 
-        // Se è manuale, deve essere FLYING. Se è auto, potrebbe essere appena crashato
-        // ma il check è avvenuto prima?
-        // Per sicurezza manteniamo il check su FLYING o checkiamo se il crash point >
-        // target
         if (game.getStatus() != GameState.FLYING && targetMultiplier == null) {
             throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
         }
@@ -128,25 +99,14 @@ public class BettingService {
             throw new IllegalStateException("Nessuna scommessa attiva trovata (Index " + index + ")");
         if (bet.getCashOutMultiplier() > 0)
             throw new IllegalStateException("Hai già incassato questa scommessa!");
-
-        // [MODIFIED] Esecuzione immediata (istantanea)
         if (targetMultiplier == null) {
-            // Manual Cashout: Execute IMMEDIATELY using current game multiplier
             return executeCashoutLogically(userId, index, game.getMultiplier());
         } else {
-            // Auto-Cashout: Executed by GameEngine loop
             return executeCashoutLogically(userId, index, targetMultiplier);
         }
     }
 
-    // [NEW] Called by GameEngineService in the main loop
-
     private synchronized CashOutResult executeCashoutLogically(String userId, int index, double multiplier) {
-        // The actual logic that was previously in cashOut
-        // ... (Reusing existing logic logic)
-
-        // Need to duplicate logic or refactor logic below...
-        // Let's copy the core logic here and make cashOut call this for AutoCashout.
 
         String betKey = getBetKey(userId, index);
         Bet bet = currentRoundBets.get(betKey);
@@ -158,8 +118,6 @@ public class BettingService {
 
         bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
-
-        // [Optimistic Broadcast] Notify client immediately before DB operation
         gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
         String txId = java.util.UUID.randomUUID().toString();
