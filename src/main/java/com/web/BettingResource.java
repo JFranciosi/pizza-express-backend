@@ -71,6 +71,18 @@ public class BettingResource {
         }
     }
 
+    @GET
+    @Path("/top")
+    public io.smallrye.mutiny.Uni<Response> getTopBets(@QueryParam("type") String type) {
+        if (type == null || (!type.equals("profit") && !type.equals("multiplier"))) {
+            type = "profit";
+        }
+        return bettingService.getTopBets(type)
+                .map(list -> Response.ok(list).build())
+                .onFailure().recoverWithItem(
+                        t -> Response.serverError().entity(new ErrorResponse("Error fetching top bets")).build());
+    }
+
     public static class ErrorResponse {
         public String error;
 

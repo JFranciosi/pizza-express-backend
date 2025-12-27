@@ -2,6 +2,10 @@
 
 ![Pizza Express Hero](./pizza-express-hero.png)
 
+> 🎨 **Looking for the Frontend?**
+> This is the Quarkus backend engine (API). To play the game, you need the Angular Interface:
+> 👉 **[CLICCA QUI PER IL REPO DEL FRONTEND](https://github.com/JFranciosi/pizza-express-frontend)**
+
 The backend engine for the **Pizza Express** Crash Game, built with **Quarkus** and **Redis**.
 It handles real-time game logic, multiplayer WebSocket synchronization, and provably fair RNG.
 

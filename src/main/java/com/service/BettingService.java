@@ -4,6 +4,7 @@ import com.model.Bet;
 import com.model.Game;
 import com.model.GameState;
 import com.repository.PlayerRepository;
+import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -12,15 +13,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.time.LocalDate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @ApplicationScoped
 public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
+    private final io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands<String, String> zsetCommands;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Inject
     PlayerRepository playerRepository;
+
+    @Inject
+    public BettingService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
+        this.zsetCommands = ds.sortedSet(String.class);
+    }
 
     @Inject
     GameEngineService gameEngine;
@@ -57,7 +67,7 @@ public class BettingService {
             }
 
             double finalAmount = round(amount);
-            String txId = java.util.UUID.randomUUID().toString(); // [NEW] Idempotency Key
+            String txId = java.util.UUID.randomUUID().toString();
 
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
             if (!success) {
@@ -112,7 +122,7 @@ public class BettingService {
         Bet bet = currentRoundBets.get(betKey);
 
         if (bet == null || bet.getCashOutMultiplier() > 0)
-            return null; // Already cashed out or bet not found
+            return null;
 
         double winAmount = round(bet.getAmount() * multiplier);
 
@@ -131,8 +141,50 @@ public class BettingService {
 
         LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + multiplier
                 + "x). Nuovo saldo: " + newBalance);
+        saveToLeaderboard(bet);
 
         return new CashOutResult(winAmount, newBalance, multiplier);
+    }
+
+    private void saveToLeaderboard(Bet bet) {
+        String today = LocalDate.now().toString();
+        String profitKey = "leaderboard:profit:" + today;
+        String multiKey = "leaderboard:multiplier:" + today;
+
+        try {
+            Map<String, Object> data = new java.util.HashMap<>();
+            data.put("id", bet.getUserId() + "_" + System.currentTimeMillis()); // Unique ID for ZSet member uniqueness
+            data.put("username", bet.getUsername());
+            data.put("avatarUrl", bet.getAvatarUrl());
+            data.put("betAmount", bet.getAmount());
+            data.put("profit", bet.getProfit());
+            data.put("multiplier", bet.getCashOutMultiplier());
+            data.put("timestamp", System.currentTimeMillis());
+
+            String json = objectMapper.writeValueAsString(data);
+            zsetCommands.zadd(profitKey, bet.getProfit(), json).subscribe().with(v -> {
+            }, t -> LOG.error("Redis Profit Error", t));
+            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), json).subscribe().with(v -> {
+            }, t -> LOG.error("Redis Multi Error", t));
+        } catch (Exception e) {
+            LOG.error("Error saving to leaderboard", e);
+        }
+    }
+
+    public io.smallrye.mutiny.Uni<List<Map<String, Object>>> getTopBets(String type) {
+        String today = LocalDate.now().toString();
+        String key = "leaderboard:" + (type.equals("multiplier") ? "multiplier" : "profit") + ":" + today;
+
+        return zsetCommands.zrange(key, 0L, 9L, new ZRangeArgs().rev())
+                .map(list -> list.stream().map(json -> {
+                    try {
+                        return objectMapper.readValue(json,
+                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                                });
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }).filter(item -> item != null).collect(Collectors.toList()));
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
@@ -140,7 +192,6 @@ public class BettingService {
             if (bet.getCashOutMultiplier() == 0 && bet.getAutoCashout() > 1.00
                     && currentMultiplier >= bet.getAutoCashout()) {
                 try {
-                    // Passa l'index e il valore ESATTO dell'auto-cashout come target
                     cashOut(bet.getUserId(), bet.getIndex(), bet.getAutoCashout());
                     LOG.info("AUTO-CASHOUT per " + bet.getUsername() + " [" + bet.getIndex() + "] a "
                             + bet.getAutoCashout() + "x (preciso)");
