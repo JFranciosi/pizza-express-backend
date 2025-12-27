@@ -1,5 +1,7 @@
 # Pizza Express Backend 🍕🚀
 
+![Pizza Express Hero](./pizza-express-hero.png)
+
 The backend engine for the **Pizza Express** Crash Game, built with **Quarkus** and **Redis**.
 It handles real-time game logic, multiplayer WebSocket synchronization, and provably fair RNG.
 
