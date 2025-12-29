@@ -8,12 +8,15 @@ import io.quarkus.websockets.next.OnOpen;
 import io.quarkus.websockets.next.OnTextMessage;
 import io.quarkus.websockets.next.WebSocket;
 import io.quarkus.websockets.next.WebSocketConnection;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
 
 @WebSocket(path = "/game")
+@RunOnVirtualThread
 public class GameSocket {
 
     private static final Logger LOG = Logger.getLogger(GameSocket.class);
@@ -22,7 +25,12 @@ public class GameSocket {
 
     private final GameEngineService gameEngine;
     private final BettingService bettingService;
-    private final io.vertx.core.Vertx vertx;
+
+    @Inject
+    public GameSocket(GameEngineService gameEngine, BettingService bettingService) {
+        this.gameEngine = gameEngine;
+        this.bettingService = bettingService;
+    }
 
     @OnOpen
     public void onOpen(WebSocketConnection connection) {
@@ -36,27 +44,19 @@ public class GameSocket {
                     }, t -> LOG.error("Errore onOpen", t));
         }
 
-        gameEngine.getHistory().subscribe().with(history -> {
-            if (history != null && !history.isEmpty()) {
-                String historyMsg = "HISTORY:" + String.join(",", history);
-                connection.sendText(historyMsg)
-                        .subscribe().with(v -> {
-                        }, t -> LOG.error("Errore invio HISTORY", t));
-            }
-        }, t -> LOG.error("Errore recupero history Redis", t));
+        List<String> history = gameEngine.getHistory();
+        if (history != null && !history.isEmpty()) {
+            String historyMsg = "HISTORY:" + String.join(",", history);
+            connection.sendText(historyMsg)
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore invio HISTORY", t));
+        }
     }
 
     @OnClose
     public void onClose(WebSocketConnection connection) {
         sessions.remove(connection);
         LOG.info("Connessione chiusa: " + connection.id());
-    }
-
-    @Inject
-    public GameSocket(GameEngineService gameEngine, BettingService bettingService, io.vertx.core.Vertx vertx) {
-        this.gameEngine = gameEngine;
-        this.bettingService = bettingService;
-        this.vertx = vertx;
     }
 
     @OnTextMessage
@@ -75,40 +75,24 @@ public class GameSocket {
                 double amount = Double.parseDouble(parts[3]);
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
-                vertx.executeBlocking(() -> {
-                    bettingService.placeBet(userId, username, amount, 0.0, index);
-                    return null;
-                }).onSuccess(res -> {
-                    connection.sendText("BET_OK:" + amount)
-                            .subscribe().with(v -> {
-                            }, t -> LOG.error("Errore invio BET_OK", t));
-                    broadcast("BET_ANNOUNCEMENT:" + username + ":" + amount);
-                }).onFailure(err -> {
-                    LOG.error("Errore placeBet", err);
-                    connection.sendText("ERROR:" + err.getMessage())
-                            .subscribe().with(v -> {
-                            }, t -> LOG.error("Errore invio ERROR placeBet", t));
-                });
+                // Blocking call on Virtual Thread
+                bettingService.placeBet(userId, username, amount, 0.0, index);
+
+                connection.sendText("BET_OK:" + amount)
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio BET_OK", t));
+                broadcast("BET_ANNOUNCEMENT:" + username + ":" + amount);
 
             } else if (message.startsWith("CASHOUT:")) {
                 String[] parts = message.split(":");
-                // CASHOUT:userId:index (optional)
                 String userId = parts[1];
                 int index = (parts.length > 2) ? Integer.parseInt(parts[2]) : 0;
 
-                vertx.executeBlocking(() -> {
-                    bettingService.cashOut(userId, index);
-                    return null;
-                }).onSuccess(res -> {
-                    connection.sendText("CASHOUT_OK")
-                            .subscribe().with(v -> {
-                            }, t -> LOG.error("Errore invio CASHOUT_OK", t));
-                }).onFailure(err -> {
-                    LOG.error("Errore cashOut", err);
-                    connection.sendText("ERROR:" + err.getMessage())
-                            .subscribe().with(v -> {
-                            }, t -> LOG.error("Errore invio ERROR cashOut", t));
-                });
+                bettingService.cashOut(userId, index);
+
+                connection.sendText("CASHOUT_OK")
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio CASHOUT_OK", t));
             }
         } catch (Exception e) {
             LOG.error("Errore gestione messaggio: " + message, e);
@@ -121,10 +105,8 @@ public class GameSocket {
     public void broadcast(String message) {
         sessions.forEach(s -> {
             s.sendText(message)
-                    .subscribe().with(
-                            item -> {
-                            },
-                            failure -> LOG.error("Errore invio messaggio a " + s.id(), failure));
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore invio broadcast a " + s.id(), t));
         });
     }
 }

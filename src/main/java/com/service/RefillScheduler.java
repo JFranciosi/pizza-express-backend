@@ -24,6 +24,7 @@ public class RefillScheduler {
     }
 
     @Scheduled(every = "5m")
+    @io.smallrye.common.annotation.RunOnVirtualThread
     void processRefills() {
         LOG.info("Running Auto-Refill check...");
         long now = System.currentTimeMillis();

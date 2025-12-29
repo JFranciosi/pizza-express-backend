@@ -35,20 +35,20 @@ public class AuthService {
     }
 
     public AuthResponse register(RegisterRequest req) {
-        if (playerRepository.existsByEmail(req.email)) {
+        if (playerRepository.existsByEmail(req.email())) {
             throw new BadRequestException("Email already in use");
         }
-        if (playerRepository.existsByUsername(req.username)) {
+        if (playerRepository.existsByUsername(req.username())) {
             throw new BadRequestException("Username already in use");
         }
 
-        String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password.toCharArray());
+        String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password().toCharArray());
         String id = UUID.randomUUID().toString();
 
         Player player = new Player(
                 id,
-                req.username,
-                req.email,
+                req.username(),
+                req.email(),
                 hashedPassword,
                 500.0);
 
@@ -62,17 +62,16 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest req) {
-        Player player = playerRepository.findByEmail(req.email);
+        Player player = playerRepository.findByEmail(req.email());
         if (player == null) {
             throw new NotAuthorizedException("Invalid credentials");
         }
 
-        BCrypt.Result result = BCrypt.verifyer().verify(req.password.toCharArray(), player.getPasswordHash());
+        BCrypt.Result result = BCrypt.verifyer().verify(req.password().toCharArray(), player.getPasswordHash());
         if (!result.verified) {
             throw new NotAuthorizedException("Invalid credentials");
         }
 
-        // Self-heal: ensure lookup keys exist for legacy users
         playerRepository.ensureIndices(player);
 
         String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
@@ -84,7 +83,7 @@ public class AuthService {
     }
 
     public AuthResponse refresh(RefreshRequest req) {
-        String playerId = playerRepository.validateRefreshToken(req.refreshToken);
+        String playerId = playerRepository.validateRefreshToken(req.refreshToken());
         if (playerId == null) {
             throw new NotAuthorizedException("Invalid refresh token");
         }
@@ -94,8 +93,7 @@ public class AuthService {
             throw new NotAuthorizedException("User not found");
         }
 
-        // Revoke old refresh token (optional, but good practice for rotation)
-        playerRepository.deleteRefreshToken(req.refreshToken);
+        playerRepository.deleteRefreshToken(req.refreshToken());
 
         String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String newRefreshToken = tokenService.generateRefreshToken();
@@ -127,7 +125,6 @@ public class AuthService {
             throw new NotAuthorizedException("User not found");
         }
 
-        // Verify password
         if (password == null || password.isEmpty()) {
             throw new BadRequestException("Password required");
         }
@@ -137,14 +134,13 @@ public class AuthService {
         }
 
         if (player.getEmail().equals(newEmail)) {
-            return; // No changes
+            return;
         }
 
         if (playerRepository.existsByEmail(newEmail)) {
             throw new BadRequestException("Email already in use");
         }
 
-        // Clean up old email lookup
         playerRepository.removeLookups(player.getEmail(), null);
 
         player.setEmail(newEmail);
@@ -161,10 +157,8 @@ public class AuthService {
     }
 
     public void forgotPassword(com.web.model.ForgotPasswordRequest req) {
-        Player player = playerRepository.findByEmail(req.email);
+        Player player = playerRepository.findByEmail(req.email());
         if (player == null) {
-            // Silently return to prevent enumeration, or throw based on policy.
-            // For UX we might want to just say "If email exists..."
             return;
         }
 
@@ -176,7 +170,7 @@ public class AuthService {
     }
 
     public void resetPassword(com.web.model.ResetPasswordRequest req) {
-        String playerId = playerRepository.validateResetToken(req.token);
+        String playerId = playerRepository.validateResetToken(req.token());
         if (playerId == null) {
             throw new BadRequestException("Invalid or expired token");
         }
@@ -186,10 +180,10 @@ public class AuthService {
             throw new BadRequestException("User not found");
         }
 
-        String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword.toCharArray());
+        String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword().toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
 
-        playerRepository.deleteResetToken(req.token);
+        playerRepository.deleteResetToken(req.token());
     }
 }

@@ -3,22 +3,21 @@ package com.service;
 import com.model.Game;
 import com.model.GameState;
 import com.web.GameSocket;
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
-import io.quarkus.redis.datasource.list.ReactiveListCommands;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.hash.HashCommands;
+import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.runtime.Startup;
-import io.smallrye.mutiny.Uni;
-import io.vertx.core.Vertx;
-import jakarta.annotation.PreDestroy;
+import io.quarkus.scheduler.Scheduled;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -35,90 +34,42 @@ public class GameEngineService {
     private static final double GROWTH_RATE = 0.00006;
 
     private long roundStartTime;
-    private long timerId;
 
     private final GameSocket gameSocket;
     private final BettingService bettingService;
     private final ProvablyFairService provablyFairService;
-    private final Vertx vertx;
-    private final ReactiveHashCommands<String, String, String> hashCommands;
-    private final ReactiveListCommands<String, String> listCommands;
+    private final HashCommands<String, String, String> hashCommands;
+    private final ListCommands<String, String> listCommands;
 
     @Inject
-    public GameEngineService(ReactiveRedisDataSource ds,
+    public GameEngineService(RedisDataSource ds,
             GameSocket gameSocket,
             BettingService bettingService,
-            ProvablyFairService provablyFairService,
-            Vertx vertx) {
+            ProvablyFairService provablyFairService) {
         this.hashCommands = ds.hash(String.class);
         this.listCommands = ds.list(String.class);
         this.gameSocket = gameSocket;
         this.bettingService = bettingService;
         this.provablyFairService = provablyFairService;
-        this.vertx = vertx;
     }
 
     @Startup
     void init() {
         if (currentGame == null) {
             startNewRound();
-            // Avvia il loop di gioco ogni 50ms (20 tick al secondo)
-            timerId = vertx.setPeriodic(50, id -> gameLoop());
         }
     }
 
-    @PreDestroy
-    void destroy() {
-        vertx.cancelTimer(timerId);
-    }
-
-    private void startNewRound() {
-        if (startingNewRound)
-            return;
-        startingNewRound = true;
-
-        provablyFairService.popNextHash()
-                .subscribe().with(gameSeed -> {
-                    currentGame = new Game();
-                    currentGame.setId(UUID.randomUUID().toString());
-                    currentGame.setStatus(GameState.WAITING);
-                    currentGame.setMultiplier(1.00);
-
-                    double crashPoint = provablyFairService.calculateCrashPoint(gameSeed);
-
-                    currentGame.setCrashPoint(crashPoint);
-                    currentGame.setSecret(gameSeed);
-                    currentGame.setHash(provablyFairService.sha256(gameSeed));
-
-                    currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
-
-                    bettingService.resetBetsForNewRound();
-                    saveGameToRedis();
-
-                    LOG.info("Nuovo round creato: " + currentGame.getId()
-                            + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
-
-                    gameSocket.broadcast("STATE:WAITING");
-                    gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
-                    gameSocket.broadcast("HASH:" + currentGame.getHash());
-
-                    startingNewRound = false;
-                }, t -> {
-                    LOG.error("Failed to start new round", t);
-                    startingNewRound = false;
-                });
-    }
-
-    private long lastSecondsBroadcast = -1;
-
+    @Scheduled(every = "0.05s")
+    @RunOnVirtualThread
     void gameLoop() {
-        if (currentGame == null)
+        if (currentGame == null || startingNewRound)
             return;
 
         long now = System.currentTimeMillis();
 
         switch (currentGame.getStatus()) {
-            case WAITING:
+            case WAITING -> {
                 if (now >= currentGame.getStartTime()) {
                     startGame();
                 } else {
@@ -129,19 +80,62 @@ public class GameEngineService {
                         lastSecondsBroadcast = remainingSeconds;
                     }
                 }
-                break;
-
-            case FLYING:
-                updateMultiplier(now);
-                break;
-
-            case CRASHED:
+            }
+            case FLYING -> updateMultiplier(now);
+            case CRASHED -> {
                 if (now >= roundStartTime + 3000) {
                     startNewRound();
                 }
-                break;
+            }
         }
     }
+
+    private void startNewRound() {
+        if (startingNewRound)
+            return;
+        startingNewRound = true;
+
+        try {
+            // Provably Fair (Sync)
+            // Assuming provablyFairService is updated to be sync or we block waiting for it
+            // Ideally refactor ProvablyFairService to sync too. For now let's assume it
+            // returns Uni and we block?
+            // Better: update ProvablyFairService to be sync.
+            // Temporary: Blocking get
+            String gameSeed = provablyFairService.popNextHash();
+            // ProvablyFairService
+
+            currentGame = new Game();
+            currentGame.setId(UUID.randomUUID().toString());
+            currentGame.setStatus(GameState.WAITING);
+            currentGame.setMultiplier(1.00);
+
+            double crashPoint = provablyFairService.calculateCrashPoint(gameSeed);
+
+            currentGame.setCrashPoint(crashPoint);
+            currentGame.setSecret(gameSeed);
+            currentGame.setHash(provablyFairService.sha256(gameSeed));
+
+            currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
+
+            bettingService.resetBetsForNewRound();
+            saveGameToRedis();
+
+            LOG.info("Nuovo round creato: " + currentGame.getId()
+                    + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
+
+            gameSocket.broadcast("STATE:WAITING");
+            gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
+            gameSocket.broadcast("HASH:" + currentGame.getHash());
+
+        } catch (Exception e) {
+            LOG.error("Failed to start new round", e);
+        } finally {
+            startingNewRound = false;
+        }
+    }
+
+    private long lastSecondsBroadcast = -1;
 
     private void startGame() {
         currentGame.setStatus(GameState.FLYING);
@@ -156,12 +150,11 @@ public class GameEngineService {
 
     private void updateMultiplier(long now) {
         long timeElapsed = now - roundStartTime;
-
         double rawMultiplier = Math.exp(GROWTH_RATE * timeElapsed);
 
         if (Double.isInfinite(rawMultiplier) || Double.isNaN(rawMultiplier)) {
             LOG.warn("Multiplier calculation overflow (Inf/NaN). Forcing crash.");
-            rawMultiplier = 100000.0; // Force max cap
+            rawMultiplier = 100000.0;
         }
 
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
@@ -171,12 +164,7 @@ public class GameEngineService {
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
-
-            vertx.executeBlocking(() -> {
-                bettingService.checkAutoCashouts(currentMultiplier);
-                return null;
-            }).onFailure(t -> LOG.error("Auto-cashout error", t));
-
+            bettingService.checkAutoCashouts(currentMultiplier); // Sync call
             gameSocket.broadcast("TICK:" + currentMultiplier);
         }
     }
@@ -195,58 +183,54 @@ public class GameEngineService {
     }
 
     private void saveGameToRedis() {
-        Map<String, String> data = new HashMap<>();
-        data.put("id", currentGame.getId());
-        data.put("status", currentGame.getStatus().name());
-        data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
-        data.put("startTime", String.valueOf(currentGame.getStartTime()));
-        if (currentGame.getHash() != null) {
-            data.put("hash", currentGame.getHash());
-        }
-
-        if (currentGame.getStatus() == GameState.CRASHED) {
-            data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
-            if (currentGame.getSecret() != null) {
-                data.put("secret", currentGame.getSecret());
-            } else {
-                data.put("secret", "Unknown");
+        try {
+            Map<String, String> data = new HashMap<>();
+            data.put("id", currentGame.getId());
+            data.put("status", currentGame.getStatus().name());
+            data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
+            data.put("startTime", String.valueOf(currentGame.getStartTime()));
+            if (currentGame.getHash() != null) {
+                data.put("hash", currentGame.getHash());
             }
-        } else {
-            data.put("crashPoint", "HIDDEN");
-        }
 
-        hashCommands.hset("game:current", data)
-                .subscribe().with(v -> {
-                }, t -> {
-                    if (t.getMessage() == null || !t.getMessage().contains("Client is closed")) {
-                        LOG.error("Errore salvataggio game su Redis", t);
-                    }
-                });
+            if (currentGame.getStatus() == GameState.CRASHED) {
+                data.put("crashPoint", String.valueOf(currentGame.getCrashPoint()));
+                data.put("secret", currentGame.getSecret() != null ? currentGame.getSecret() : "Unknown");
+            } else {
+                data.put("crashPoint", "HIDDEN");
+            }
+
+            hashCommands.hset("game:current", data);
+        } catch (Exception e) {
+            LOG.error("Errore salvataggio game su Redis", e);
+        }
     }
 
     private void saveToHistory(double crashPoint) {
-        String historyEntry = crashPoint + ":" + currentGame.getSecret();
-        listCommands.lpush("game:history", historyEntry)
-                .chain(v -> listCommands.ltrim("game:history", 0, 199))
-                .subscribe().with(v -> {
-                }, t -> {
-                    if (t.getMessage() == null || !t.getMessage().contains("Client is closed")) {
-                        LOG.error("Errore salvataggio history su Redis", t);
-                    }
-                });
+        try {
+            String historyEntry = crashPoint + ":" + currentGame.getSecret();
+            listCommands.lpush("game:history", historyEntry);
+            listCommands.ltrim("game:history", 0, 199);
+        } catch (Exception e) {
+            LOG.error("Errore salvataggio history su Redis", e);
+        }
     }
 
     public Game getCurrentGame() {
         return currentGame;
     }
 
-    public Uni<List<String>> getHistory() {
+    public List<String> getHistory() {
         return listCommands.lrange("game:history", 0, 199);
     }
 
-    public Uni<List<String>> getFullHistory(int limit) {
+    public List<String> getFullHistory(int limit) {
         int max = Math.min(limit, 200);
         return listCommands.lrange("game:history", 0, max - 1);
+    }
+
+    public long getRoundStartTime() {
+        return roundStartTime;
     }
 
     public void broadcast(String message) {

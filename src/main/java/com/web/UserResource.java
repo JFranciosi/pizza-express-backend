@@ -11,6 +11,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.Base64;
 
 @Path("/users")
+@io.smallrye.common.annotation.RunOnVirtualThread
 public class UserResource {
 
     private final PlayerRepository playerRepository;

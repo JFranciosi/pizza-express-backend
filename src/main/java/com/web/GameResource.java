@@ -30,7 +30,8 @@ public class GameResource {
     @GET
     @Path("/history")
     @PermitAll
-    public Uni<List<String>> getFullHistory(@jakarta.ws.rs.QueryParam("limit") Integer limit) {
+    @io.smallrye.common.annotation.RunOnVirtualThread
+    public List<String> getFullHistory(@jakarta.ws.rs.QueryParam("limit") Integer limit) {
         int actualLimit = (limit != null && limit > 0) ? limit : 50;
         return gameEngine.getFullHistory(actualLimit);
     }

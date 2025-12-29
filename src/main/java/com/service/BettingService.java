@@ -6,10 +6,10 @@ import com.model.Game;
 import com.model.GameState;
 import com.model.Player;
 import com.repository.PlayerRepository;
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
+import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
-import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -30,8 +30,8 @@ public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
-    private final ReactiveSortedSetCommands<String, String> zsetCommands;
-    private final io.quarkus.redis.datasource.keys.ReactiveKeyCommands<String> keyCommands;
+    private final SortedSetCommands<String, String> zsetCommands;
+    private final KeyCommands<String> keyCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final PlayerRepository playerRepository;
@@ -39,7 +39,7 @@ public class BettingService {
     private final WalletService walletService;
 
     @Inject
-    public BettingService(ReactiveRedisDataSource ds,
+    public BettingService(RedisDataSource ds,
             PlayerRepository playerRepository,
             Instance<GameEngineService> gameEngineInstance,
             WalletService walletService) {
@@ -65,7 +65,7 @@ public class BettingService {
             throw new IllegalStateException(
                     "Non puoi scommettere ora. Il gioco è " + (game != null ? game.getStatus() : "null"));
         }
-        if (amount <= 0 || amount < 0.10) {
+        if (amount < 0.10) {
             throw new IllegalArgumentException("L'importo minimo è 0.10€");
         }
         if (amount > 100) {
@@ -126,6 +126,14 @@ public class BettingService {
         if (bet.getCashOutMultiplier() > 0)
             throw new IllegalStateException("Hai già incassato questa scommessa!");
         if (targetMultiplier == null) {
+            long now = System.currentTimeMillis();
+            long startTime = getGameEngine().getRoundStartTime();
+            if (startTime > 0) {
+                long elapsed = now - startTime;
+                double rawMultiplier = Math.exp(0.00006 * elapsed);
+                double liveMultiplier = Math.floor(rawMultiplier * 100) / 100.0;
+                return executeCashoutLogically(userId, index, liveMultiplier);
+            }
             return executeCashoutLogically(userId, index, game.getMultiplier());
         } else {
             return executeCashoutLogically(userId, index, targetMultiplier);
@@ -177,53 +185,45 @@ public class BettingService {
                     String.valueOf(bet.getCashOutMultiplier()),
                     String.valueOf(System.currentTimeMillis()));
 
-            zsetCommands.zadd(profitKey, bet.getProfit(), compactData).subscribe().with(v -> {
-                // Set TTL to 48 hours (2 days) to allow viewing yesterday's history
-                keyCommands.expire(profitKey, 172800).subscribe().with(x -> {
-                }, t -> LOG.error("TTL Profit Error", t));
-            }, t -> LOG.error("Redis Profit Error", t));
+            zsetCommands.zadd(profitKey, bet.getProfit(), compactData);
+            keyCommands.expire(profitKey, 172800);
 
-            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), compactData).subscribe().with(v -> {
-                keyCommands.expire(multiKey, 172800).subscribe().with(x -> {
-                }, t -> LOG.error("TTL Multi Error", t));
-            }, t -> LOG.error("Redis Multi Error", t));
+            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), compactData);
+            keyCommands.expire(multiKey, 172800);
         } catch (Exception e) {
             LOG.error("Error saving to leaderboard", e);
         }
     }
 
-    public Uni<List<Map<String, Object>>> getTopBets(String type) {
+    public List<Map<String, Object>> getTopBets(String type) {
         String today = LocalDate.now().toString();
         String key = "leaderboard:" + (type.equals("multiplier") ? "multiplier" : "profit") + ":" + today;
 
-        return zsetCommands.zrange(key, 0L, 9L, new ZRangeArgs().rev())
-                .map(list -> list.stream().map(dataString -> {
-                    try {
-                        Map<String, Object> map = new HashMap<>();
-                        if (dataString.contains("|")) {
-                            String[] parts = dataString.split("\\|");
-                            if (parts.length >= 6) {
-                                map.put("id", parts[0] + "_" + parts[5]);
-                                map.put("userId", parts[0]);
-                                map.put("username", parts[1]);
-                                map.put("betAmount", Double.parseDouble(parts[2]));
-                                map.put("profit", Double.parseDouble(parts[3]));
-                                map.put("multiplier", Double.parseDouble(parts[4]));
-                                map.put("timestamp", Long.parseLong(parts[5]));
+        List<String> list = zsetCommands.zrange(key, 0L, 9L, new ZRangeArgs().rev());
 
-                                // Reconstruct Avatar API URL
-                                map.put("avatarUrl", "/users/" + parts[0] + "/avatar");
-                                return map;
-                            }
-                        }
-
-                        // Fallback: Try parsing old JSON format
-                        return objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
-                        });
-                    } catch (Exception e) {
-                        return null;
+        return list.stream().map(dataString -> {
+            try {
+                Map<String, Object> map = new HashMap<>();
+                if (dataString.contains("|")) {
+                    String[] parts = dataString.split("\\|");
+                    if (parts.length >= 6) {
+                        map.put("id", parts[0] + "_" + parts[5]);
+                        map.put("userId", parts[0]);
+                        map.put("username", parts[1]);
+                        map.put("betAmount", Double.parseDouble(parts[2]));
+                        map.put("profit", Double.parseDouble(parts[3]));
+                        map.put("multiplier", Double.parseDouble(parts[4]));
+                        map.put("timestamp", Long.parseLong(parts[5]));
+                        map.put("avatarUrl", "/users/" + parts[0] + "/avatar");
+                        return map;
                     }
-                }).filter(item -> item != null).collect(Collectors.toList()));
+                }
+                return objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
+                });
+            } catch (Exception e) {
+                return null;
+            }
+        }).filter(item -> item != null).collect(Collectors.toList());
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
