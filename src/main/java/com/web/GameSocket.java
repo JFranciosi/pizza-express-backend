@@ -75,7 +75,6 @@ public class GameSocket {
                 double amount = Double.parseDouble(parts[3]);
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
-                // Blocking call on Virtual Thread
                 bettingService.placeBet(userId, username, amount, 0.0, index);
 
                 connection.sendText("BET_OK:" + amount)
