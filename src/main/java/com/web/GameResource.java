@@ -1,7 +1,6 @@
 package com.web;
 
 import com.service.GameEngineService;
-import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
