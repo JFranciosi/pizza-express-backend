@@ -13,13 +13,17 @@ import java.util.List;
 public class RefillScheduler {
 
     private static final Logger LOG = Logger.getLogger(RefillScheduler.class);
-    // 24 Hours in milliseconds
+
     private static final long REFILL_DELAY_MS = 24 * 60 * 60 * 1000L;
 
-    @Inject
-    PlayerRepository playerRepository;
+    private final PlayerRepository playerRepository;
 
-    @Scheduled(every = "1m")
+    @Inject
+    public RefillScheduler(PlayerRepository playerRepository) {
+        this.playerRepository = playerRepository;
+    }
+
+    @Scheduled(every = "5m")
     void processRefills() {
         LOG.info("Running Auto-Refill check...");
         long now = System.currentTimeMillis();
@@ -43,10 +47,8 @@ public class RefillScheduler {
                         playerRepository.save(player);
                         LOG.info("REFILLED bucket for user: " + player.getUsername());
                     }
-                    // Remove from tracking list (either refilled or didn't need it)
                     playerRepository.clearZeroBalance(playerId);
                 } else {
-                    // Player no longer exists, clean up
                     playerRepository.clearZeroBalance(playerId);
                 }
             } catch (Exception e) {

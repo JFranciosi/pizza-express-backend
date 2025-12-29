@@ -9,8 +9,14 @@ import java.util.Set;
 @ApplicationScoped
 public class TokenService {
 
+    private final CryptoService cryptoService;
+    private final io.smallrye.jwt.auth.principal.JWTParser parser;
+
     @jakarta.inject.Inject
-    CryptoService cryptoService;
+    public TokenService(CryptoService cryptoService, io.smallrye.jwt.auth.principal.JWTParser parser) {
+        this.cryptoService = cryptoService;
+        this.parser = parser;
+    }
 
     public String generateAccessToken(String email, String username, String userId) {
         try {
@@ -19,7 +25,7 @@ public class TokenService {
                     .claim("username", username)
                     .groups(Set.of("User"))
                     .claim("userId", userId)
-                    .expiresIn(3600) // 1 hour
+                    .expiresIn(3600)
                     .sign(cryptoService.getPrivateKey());
         } catch (Exception e) {
             throw new RuntimeException("Failed to sign JWT token", e);
@@ -31,9 +37,6 @@ public class TokenService {
         new SecureRandom().nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
-
-    @jakarta.inject.Inject
-    io.smallrye.jwt.auth.principal.JWTParser parser;
 
     public String getUserIdFromToken(String token) throws io.smallrye.jwt.auth.principal.ParseException {
         // Remove "Bearer " prefix if present

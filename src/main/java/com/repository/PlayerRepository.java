@@ -146,9 +146,7 @@ public class PlayerRepository {
         report.append("Starting scan...\n");
 
         for (String key : keys) {
-            // Ignore lookup keys
             if (key.contains(":email:") || key.contains(":username:")) {
-                // report.append("Skipped lookup: ").append(key).append("\n");
                 continue;
             }
 

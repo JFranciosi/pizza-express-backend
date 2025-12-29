@@ -1,49 +1,65 @@
 package com.service;
 
+import com.dto.CashOutResult;
 import com.model.Bet;
 import com.model.Game;
 import com.model.GameState;
+import com.model.Player;
 import com.repository.PlayerRepository;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @ApplicationScoped
 public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
-    private final io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands<String, String> zsetCommands;
+    private final ReactiveSortedSetCommands<String, String> zsetCommands;
+    private final io.quarkus.redis.datasource.keys.ReactiveKeyCommands<String> keyCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Inject
-    PlayerRepository playerRepository;
+    private final PlayerRepository playerRepository;
+    private final Instance<GameEngineService> gameEngineInstance;
+    private final WalletService walletService;
 
     @Inject
-    public BettingService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
+    public BettingService(ReactiveRedisDataSource ds,
+            PlayerRepository playerRepository,
+            Instance<GameEngineService> gameEngineInstance,
+            WalletService walletService) {
         this.zsetCommands = ds.sortedSet(String.class);
+        this.keyCommands = ds.key(String.class);
+        this.playerRepository = playerRepository;
+        this.gameEngineInstance = gameEngineInstance;
+        this.walletService = walletService;
     }
 
-    @Inject
-    GameEngineService gameEngine;
-
-    @Inject
-    WalletService walletService;
+    private GameEngineService getGameEngine() {
+        return gameEngineInstance.get();
+    }
 
     private String getBetKey(String userId, int index) {
         return userId + ":" + index;
     }
 
     public void placeBet(String userId, String username, double amount, double autoCashout, int index) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
 
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException(
@@ -67,13 +83,13 @@ public class BettingService {
             }
 
             double finalAmount = round(amount);
-            String txId = java.util.UUID.randomUUID().toString();
+            String txId = UUID.randomUUID().toString();
 
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
             if (!success) {
                 throw new IllegalStateException("Saldo insufficiente o errore transazione");
             }
-            com.model.Player player = playerRepository.findById(userId);
+            Player player = playerRepository.findById(userId);
             String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
 
             Bet bet = new Bet(userId, username, game.getId(), finalAmount, index, avatarUrl);
@@ -85,7 +101,7 @@ public class BettingService {
         String avatarApiUrl = (avatarUrl != null && !avatarUrl.isEmpty()) ? "/users/" + userId + "/avatar" : "";
 
         LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
-        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
+        getGameEngine().broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
     public CashOutResult cashOut(String userId, int index) {
@@ -93,7 +109,7 @@ public class BettingService {
     }
 
     public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
         if (game == null) {
             throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
         }
@@ -128,10 +144,11 @@ public class BettingService {
 
         bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
-        gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+        getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
-        String txId = java.util.UUID.randomUUID().toString();
-        boolean success = walletService.creditWinnings(userId, winAmount, gameEngine.getCurrentGame().getId(), txId);
+        String txId = UUID.randomUUID().toString();
+        boolean success = walletService.creditWinnings(userId, winAmount, getGameEngine().getCurrentGame().getId(),
+                txId);
 
         if (!success) {
             LOG.error("CRITICAL: Failed to credit winnings for user " + userId);
@@ -152,35 +169,57 @@ public class BettingService {
         String multiKey = "leaderboard:multiplier:" + today;
 
         try {
-            Map<String, Object> data = new java.util.HashMap<>();
-            data.put("id", bet.getUserId() + "_" + System.currentTimeMillis()); // Unique ID for ZSet member uniqueness
-            data.put("username", bet.getUsername());
-            data.put("avatarUrl", bet.getAvatarUrl());
-            data.put("betAmount", bet.getAmount());
-            data.put("profit", bet.getProfit());
-            data.put("multiplier", bet.getCashOutMultiplier());
-            data.put("timestamp", System.currentTimeMillis());
+            String compactData = String.join("|",
+                    bet.getUserId(),
+                    bet.getUsername(),
+                    String.valueOf(bet.getAmount()),
+                    String.valueOf(bet.getProfit()),
+                    String.valueOf(bet.getCashOutMultiplier()),
+                    String.valueOf(System.currentTimeMillis()));
 
-            String json = objectMapper.writeValueAsString(data);
-            zsetCommands.zadd(profitKey, bet.getProfit(), json).subscribe().with(v -> {
+            zsetCommands.zadd(profitKey, bet.getProfit(), compactData).subscribe().with(v -> {
+                // Set TTL to 48 hours (2 days) to allow viewing yesterday's history
+                keyCommands.expire(profitKey, 172800).subscribe().with(x -> {
+                }, t -> LOG.error("TTL Profit Error", t));
             }, t -> LOG.error("Redis Profit Error", t));
-            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), json).subscribe().with(v -> {
+
+            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), compactData).subscribe().with(v -> {
+                keyCommands.expire(multiKey, 172800).subscribe().with(x -> {
+                }, t -> LOG.error("TTL Multi Error", t));
             }, t -> LOG.error("Redis Multi Error", t));
         } catch (Exception e) {
             LOG.error("Error saving to leaderboard", e);
         }
     }
 
-    public io.smallrye.mutiny.Uni<List<Map<String, Object>>> getTopBets(String type) {
+    public Uni<List<Map<String, Object>>> getTopBets(String type) {
         String today = LocalDate.now().toString();
         String key = "leaderboard:" + (type.equals("multiplier") ? "multiplier" : "profit") + ":" + today;
 
         return zsetCommands.zrange(key, 0L, 9L, new ZRangeArgs().rev())
-                .map(list -> list.stream().map(json -> {
+                .map(list -> list.stream().map(dataString -> {
                     try {
-                        return objectMapper.readValue(json,
-                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
-                                });
+                        Map<String, Object> map = new HashMap<>();
+                        if (dataString.contains("|")) {
+                            String[] parts = dataString.split("\\|");
+                            if (parts.length >= 6) {
+                                map.put("id", parts[0] + "_" + parts[5]);
+                                map.put("userId", parts[0]);
+                                map.put("username", parts[1]);
+                                map.put("betAmount", Double.parseDouble(parts[2]));
+                                map.put("profit", Double.parseDouble(parts[3]));
+                                map.put("multiplier", Double.parseDouble(parts[4]));
+                                map.put("timestamp", Long.parseLong(parts[5]));
+
+                                // Reconstruct Avatar API URL
+                                map.put("avatarUrl", "/users/" + parts[0] + "/avatar");
+                                return map;
+                            }
+                        }
+
+                        // Fallback: Try parsing old JSON format
+                        return objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
+                        });
                     } catch (Exception e) {
                         return null;
                     }
@@ -203,7 +242,7 @@ public class BettingService {
     }
 
     public void cancelBet(String userId, int index) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException("Non puoi cancellare la scommessa ora.");
         }
@@ -216,13 +255,11 @@ public class BettingService {
 
         currentRoundBets.remove(betKey);
 
-        currentRoundBets.remove(betKey);
-
-        String txId = java.util.UUID.randomUUID().toString();
+        String txId = UUID.randomUUID().toString();
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
         LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
-        gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
+        getGameEngine().broadcast("CANCEL_BET:" + userId + ":" + index);
     }
 
     public List<Bet> resetBetsForNewRound() {
@@ -233,18 +270,6 @@ public class BettingService {
 
     private double round(double value) {
         return Math.round(value * 100.0) / 100.0;
-    }
-
-    public static class CashOutResult {
-        public double winAmount;
-        public double newBalance;
-        public double multiplier;
-
-        public CashOutResult(double winAmount, double newBalance, double multiplier) {
-            this.winAmount = winAmount;
-            this.newBalance = newBalance;
-            this.multiplier = multiplier;
-        }
     }
 
     public Map<String, Bet> getCurrentBets() {

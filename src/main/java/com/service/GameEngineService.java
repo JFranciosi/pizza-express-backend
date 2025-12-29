@@ -3,12 +3,22 @@ package com.service;
 import com.model.Game;
 import com.model.GameState;
 import com.web.GameSocket;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
+import io.quarkus.redis.datasource.list.ReactiveListCommands;
+import io.quarkus.runtime.Startup;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.Vertx;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -21,36 +31,34 @@ public class GameEngineService {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean startingNewRound = false;
 
-    // Configurazione gioco
-    private static final long WAITING_TIME_MS = 10000; // 10 secondi di attesa
-    private static final double GROWTH_RATE = 0.00006; // Velocità di crescita (da calibrare)
+    private static final long WAITING_TIME_MS = 10000;
+    private static final double GROWTH_RATE = 0.00006;
 
-    // Stato interno per il loop
     private long roundStartTime;
     private long timerId;
 
-    @Inject
-    GameSocket gameSocket;
+    private final GameSocket gameSocket;
+    private final BettingService bettingService;
+    private final ProvablyFairService provablyFairService;
+    private final Vertx vertx;
+    private final ReactiveHashCommands<String, String, String> hashCommands;
+    private final ReactiveListCommands<String, String> listCommands;
 
     @Inject
-    BettingService bettingService;
-
-    @Inject
-    ProvablyFairService provablyFairService; // [NEW]
-
-    @Inject
-    io.vertx.core.Vertx vertx;
-
-    private final io.quarkus.redis.datasource.hash.ReactiveHashCommands<String, String, String> hashCommands;
-    private final io.quarkus.redis.datasource.list.ReactiveListCommands<String, String> listCommands;
-
-    @Inject
-    public GameEngineService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
+    public GameEngineService(ReactiveRedisDataSource ds,
+            GameSocket gameSocket,
+            BettingService bettingService,
+            ProvablyFairService provablyFairService,
+            Vertx vertx) {
         this.hashCommands = ds.hash(String.class);
         this.listCommands = ds.list(String.class);
+        this.gameSocket = gameSocket;
+        this.bettingService = bettingService;
+        this.provablyFairService = provablyFairService;
+        this.vertx = vertx;
     }
 
-    @io.quarkus.runtime.Startup
+    @Startup
     void init() {
         if (currentGame == null) {
             startNewRound();
@@ -59,7 +67,7 @@ public class GameEngineService {
         }
     }
 
-    @jakarta.annotation.PreDestroy
+    @PreDestroy
     void destroy() {
         vertx.cancelTimer(timerId);
     }
@@ -90,7 +98,6 @@ public class GameEngineService {
                     LOG.info("Nuovo round creato: " + currentGame.getId()
                             + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
 
-                    // Broadcast info
                     gameSocket.broadcast("STATE:WAITING");
                     gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
                     gameSocket.broadcast("HASH:" + currentGame.getHash());
@@ -104,7 +111,6 @@ public class GameEngineService {
 
     private long lastSecondsBroadcast = -1;
 
-    // Rimosso @Scheduled, ora chiamato da Vert.x
     void gameLoop() {
         if (currentGame == null)
             return;
@@ -130,7 +136,7 @@ public class GameEngineService {
                 break;
 
             case CRASHED:
-                if (now >= roundStartTime + 3000) { // Allungato a 3s per leggere risultato
+                if (now >= roundStartTime + 3000) {
                     startNewRound();
                 }
                 break;
@@ -151,7 +157,6 @@ public class GameEngineService {
     private void updateMultiplier(long now) {
         long timeElapsed = now - roundStartTime;
 
-        // Formula esponenziale: E^(k * t)
         double rawMultiplier = Math.exp(GROWTH_RATE * timeElapsed);
 
         if (Double.isInfinite(rawMultiplier) || Double.isNaN(rawMultiplier)) {
@@ -162,8 +167,6 @@ public class GameEngineService {
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
         double currentMultiplier = bd.doubleValue();
 
-        // Check crash
-        // Nota: usiamo >= per crashare ESATTAMENTE al punto o appena superato
         if (currentMultiplier >= currentGame.getCrashPoint()) {
             crash(currentGame.getCrashPoint());
         } else {
@@ -182,18 +185,17 @@ public class GameEngineService {
         currentGame.setStatus(GameState.CRASHED);
         currentGame.setMultiplier(finalMultiplier);
         running.set(false);
-        roundStartTime = System.currentTimeMillis(); // Reset timer per restart logic
+        roundStartTime = System.currentTimeMillis();
 
         saveGameToRedis();
         saveToHistory(finalMultiplier);
 
         LOG.info("CRASHED at " + finalMultiplier + "x 💥");
-        // Reveal Secret (Seed) on Crash
         gameSocket.broadcast("CRASH:" + finalMultiplier + ":" + currentGame.getSecret());
     }
 
     private void saveGameToRedis() {
-        java.util.Map<String, String> data = new java.util.HashMap<>();
+        Map<String, String> data = new HashMap<>();
         data.put("id", currentGame.getId());
         data.put("status", currentGame.getStatus().name());
         data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
@@ -211,7 +213,6 @@ public class GameEngineService {
             }
         } else {
             data.put("crashPoint", "HIDDEN");
-            // Secret not sent
         }
 
         hashCommands.hset("game:current", data)
@@ -224,7 +225,6 @@ public class GameEngineService {
     }
 
     private void saveToHistory(double crashPoint) {
-        // Save format: CrashPoint:Seed
         String historyEntry = crashPoint + ":" + currentGame.getSecret();
         listCommands.lpush("game:history", historyEntry)
                 .chain(v -> listCommands.ltrim("game:history", 0, 199))
@@ -236,17 +236,15 @@ public class GameEngineService {
                 });
     }
 
-    // Removed old RNG methods (generateCrashPoint, generateHash, bytesToHex)
-
     public Game getCurrentGame() {
         return currentGame;
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getHistory() {
+    public Uni<List<String>> getHistory() {
         return listCommands.lrange("game:history", 0, 199);
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
+    public Uni<List<String>> getFullHistory(int limit) {
         int max = Math.min(limit, 200);
         return listCommands.lrange("game:history", 0, max - 1);
     }

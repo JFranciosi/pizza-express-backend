@@ -18,17 +18,20 @@ import jakarta.ws.rs.PathParam;
 @Produces(MediaType.APPLICATION_JSON)
 public class GameResource {
 
-    @Inject
-    GameEngineService gameEngine;
+    private final GameEngineService gameEngine;
+    private final PlayerRepository playerRepository;
 
     @Inject
-    PlayerRepository playerRepository;
+    public GameResource(GameEngineService gameEngine, PlayerRepository playerRepository) {
+        this.gameEngine = gameEngine;
+        this.playerRepository = playerRepository;
+    }
 
     @GET
     @Path("/history")
     @PermitAll
     public Uni<List<String>> getFullHistory(@jakarta.ws.rs.QueryParam("limit") Integer limit) {
-        int actualLimit = (limit != null && limit > 0) ? limit : 50; // Default 50 if not specified
+        int actualLimit = (limit != null && limit > 0) ? limit : 50;
         return gameEngine.getFullHistory(actualLimit);
     }
 

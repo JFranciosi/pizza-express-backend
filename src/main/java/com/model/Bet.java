@@ -25,7 +25,6 @@ public class Bet {
         this.avatarUrl = avatarUrl;
     }
 
-    // Getter e Setter
     public String getUserId() {
         return userId;
     }

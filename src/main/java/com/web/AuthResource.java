@@ -34,14 +34,15 @@ public class AuthResource {
         public org.jboss.resteasy.reactive.multipart.FileUpload file;
     }
 
-    @Inject
-    AuthService authService;
+    private final AuthService authService;
+    private final com.service.TokenService tokenService;
 
     @Inject
-    com.service.TokenService tokenService;
-
-    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "app.frontend.url")
-    String frontendUrl;
+    public AuthResource(AuthService authService,
+            com.service.TokenService tokenService) {
+        this.authService = authService;
+        this.tokenService = tokenService;
+    }
 
     @POST
     @Path("/change-password")
