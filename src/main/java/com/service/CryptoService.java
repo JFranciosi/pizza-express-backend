@@ -14,20 +14,16 @@ public class CryptoService {
     String rawPrivateKey;
 
     public PrivateKey getPrivateKey() throws Exception {
-        // CORREZIONE FONDAMENTALE PER AZURE
-        // Sostituisce i caratteri letterali "\n" con dei veri "a capo" se presenti
         if (rawPrivateKey == null || rawPrivateKey.isEmpty()) {
             throw new RuntimeException("JWT_PRIVATE_KEY is missing via CryptoService!");
         }
 
         String realPem = rawPrivateKey.contains("\\n") ? rawPrivateKey.replace("\\n", "\n") : rawPrivateKey;
 
-        // Pulizia per Java (Java vuole solo il Base64 puro, senza
-        // header/footer/newlines)
         String privateKeyPEM = realPem
                 .replace("-----BEGIN PRIVATE KEY-----", "")
                 .replace("-----END PRIVATE KEY-----", "")
-                .replaceAll("[^A-Za-z0-9+/=]", ""); // Rimuove QUALSIASI carattere non valido per Base64
+                .replaceAll("[^A-Za-z0-9+/=]", "");
 
         byte[] encoded = Base64.getDecoder().decode(privateKeyPEM);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");

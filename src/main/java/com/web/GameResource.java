@@ -18,11 +18,14 @@ import jakarta.ws.rs.PathParam;
 @Produces(MediaType.APPLICATION_JSON)
 public class GameResource {
 
-    @Inject
-    GameEngineService gameEngine;
+    private final GameEngineService gameEngine;
+    private final PlayerRepository playerRepository;
 
     @Inject
-    PlayerRepository playerRepository;
+    public GameResource(GameEngineService gameEngine, PlayerRepository playerRepository) {
+        this.gameEngine = gameEngine;
+        this.playerRepository = playerRepository;
+    }
 
     @GET
     @Path("/history")

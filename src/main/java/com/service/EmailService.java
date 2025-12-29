@@ -9,11 +9,15 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 @ApplicationScoped
 public class EmailService {
 
-    @Inject
-    Mailer mailer;
+    private final Mailer mailer;
+    private final String from;
 
-    @ConfigProperty(name = "quarkus.mailer.from", defaultValue = "noreply@pizzaexpress.com")
-    String from;
+    @Inject
+    public EmailService(Mailer mailer,
+            @ConfigProperty(name = "quarkus.mailer.from", defaultValue = "noreply@pizzaexpress.com") String from) {
+        this.mailer = mailer;
+        this.from = from;
+    }
 
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
         String subject = "Pizza Express - Password Reset";

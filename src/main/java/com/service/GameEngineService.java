@@ -98,7 +98,6 @@ public class GameEngineService {
                     LOG.info("Nuovo round creato: " + currentGame.getId()
                             + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
 
-                    // Broadcast info
                     gameSocket.broadcast("STATE:WAITING");
                     gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
                     gameSocket.broadcast("HASH:" + currentGame.getHash());
@@ -158,7 +157,6 @@ public class GameEngineService {
     private void updateMultiplier(long now) {
         long timeElapsed = now - roundStartTime;
 
-        // Formula esponenziale: E^(k * t)
         double rawMultiplier = Math.exp(GROWTH_RATE * timeElapsed);
 
         if (Double.isInfinite(rawMultiplier) || Double.isNaN(rawMultiplier)) {
@@ -169,8 +167,6 @@ public class GameEngineService {
         BigDecimal bd = new BigDecimal(rawMultiplier).setScale(2, RoundingMode.FLOOR);
         double currentMultiplier = bd.doubleValue();
 
-        // Check crash
-        // Nota: usiamo >= per crashare ESATTAMENTE al punto o appena superato
         if (currentMultiplier >= currentGame.getCrashPoint()) {
             crash(currentGame.getCrashPoint());
         } else {
@@ -189,13 +185,12 @@ public class GameEngineService {
         currentGame.setStatus(GameState.CRASHED);
         currentGame.setMultiplier(finalMultiplier);
         running.set(false);
-        roundStartTime = System.currentTimeMillis(); // Reset timer per restart logic
+        roundStartTime = System.currentTimeMillis();
 
         saveGameToRedis();
         saveToHistory(finalMultiplier);
 
         LOG.info("CRASHED at " + finalMultiplier + "x 💥");
-        // Reveal Secret (Seed) on Crash
         gameSocket.broadcast("CRASH:" + finalMultiplier + ":" + currentGame.getSecret());
     }
 

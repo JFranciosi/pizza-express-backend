@@ -18,23 +18,17 @@ public class GameSocket {
 
     private static final Logger LOG = Logger.getLogger(GameSocket.class);
 
-    // Mantiene traccia di tutte le connessioni attive per il broadcast
-    // Nota: in un ambiente clusterizzato servirebbe una soluzione Pub/Sub (es.
-    // Redis)
     private static final Set<WebSocketConnection> sessions = ConcurrentHashMap.newKeySet();
 
-    @Inject
-    GameEngineService gameEngine;
-
-    @Inject
-    BettingService bettingService;
+    private final GameEngineService gameEngine;
+    private final BettingService bettingService;
+    private final io.vertx.core.Vertx vertx;
 
     @OnOpen
     public void onOpen(WebSocketConnection connection) {
         sessions.add(connection);
         LOG.info("Nuova connessione WebSocket: " + connection.id());
 
-        // Invia lo stato corrente del gioco appena ci si connette
         Game currentGame = gameEngine.getCurrentGame();
         if (currentGame != null) {
             connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
@@ -42,7 +36,6 @@ public class GameSocket {
                     }, t -> LOG.error("Errore onOpen", t));
         }
 
-        // Invia la history degli ultimi crash
         gameEngine.getHistory().subscribe().with(history -> {
             if (history != null && !history.isEmpty()) {
                 String historyMsg = "HISTORY:" + String.join(",", history);
@@ -60,18 +53,17 @@ public class GameSocket {
     }
 
     @Inject
-    io.vertx.core.Vertx vertx;
+    public GameSocket(GameEngineService gameEngine, BettingService bettingService, io.vertx.core.Vertx vertx) {
+        this.gameEngine = gameEngine;
+        this.bettingService = bettingService;
+        this.vertx = vertx;
+    }
 
     @OnTextMessage
     public void onMessage(WebSocketConnection connection, String message) {
-        // Protocollo semplificato:
-        // BET:userId:username:amount
-        // CASHOUT:userId
-
         try {
             if (message.startsWith("BET:")) {
                 String[] parts = message.split(":");
-                // BET:userId:username:amount:index (optional)
                 if (parts.length < 4) {
                     connection.sendText("ERROR:Formato scommessa errato. Usa BET:userId:username:amount[:index]")
                             .subscribe().with(v -> {
@@ -126,7 +118,6 @@ public class GameSocket {
         }
     }
 
-    // Metodo per il broadcast chiamato dal GameEngineService
     public void broadcast(String message) {
         sessions.forEach(s -> {
             s.sendText(message)

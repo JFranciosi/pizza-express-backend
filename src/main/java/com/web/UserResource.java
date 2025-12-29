@@ -13,8 +13,12 @@ import java.util.Base64;
 @Path("/users")
 public class UserResource {
 
+    private final PlayerRepository playerRepository;
+
     @Inject
-    PlayerRepository playerRepository;
+    public UserResource(PlayerRepository playerRepository) {
+        this.playerRepository = playerRepository;
+    }
 
     @GET
     @Path("/{userId}/avatar")

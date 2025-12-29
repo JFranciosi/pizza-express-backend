@@ -16,17 +16,15 @@ public class LocalRedisWalletService implements WalletService {
 
     private static final Logger LOG = Logger.getLogger(LocalRedisWalletService.class);
     private static final String IDEMPOTENCY_PREFIX = "wallet:tx:";
-    // TTL per le chiavi di idempotenza (es. 24h)
     private static final Duration PROCESSED_TX_TTL = Duration.ofHours(24);
 
-    @Inject
-    PlayerRepository playerRepository;
-
+    private final PlayerRepository playerRepository;
     private final ReactiveValueCommands<String, String> valueCommands;
 
     @Inject
-    public LocalRedisWalletService(ReactiveRedisDataSource ds) {
+    public LocalRedisWalletService(ReactiveRedisDataSource ds, PlayerRepository playerRepository) {
         this.valueCommands = ds.value(String.class);
+        this.playerRepository = playerRepository;
     }
 
     @Override
@@ -92,7 +90,7 @@ public class LocalRedisWalletService implements WalletService {
     @Override
     public boolean refundBet(String userId, double amount, String roundId, String transactionId) {
         if (isTransactionProcessed(transactionId)) {
-            return true; // Già rimborsato
+            return true;
         }
 
         synchronized (getUserLock(userId)) {
@@ -120,13 +118,7 @@ public class LocalRedisWalletService implements WalletService {
         return player != null ? player.getBalance() : 0.0;
     }
 
-    // --- Helpers ---
-
     private boolean isTransactionProcessed(String transactionId) {
-        // Controlliamo se la chiave esiste su Redis
-        // valueCommands restituisce un Uni, quindi blocchiamo per l'implementazione
-        // sincrona attuale
-        // In futuro si potrebbe fare tutto reattivo
         return valueCommands.get(IDEMPOTENCY_PREFIX + transactionId).await().indefinitely() != null;
     }
 
@@ -139,9 +131,6 @@ public class LocalRedisWalletService implements WalletService {
         return Math.round(value * 100.0) / 100.0;
     }
 
-    // Cache lock primitiva per evitare locking distribuito complesso per ora
-    // Nota: Funziona solo se c'è 1 istanza del backend. Per scaling orizzontale
-    // serve Redisson lock.
     private final java.util.concurrent.ConcurrentHashMap<String, Object> userLocks = new java.util.concurrent.ConcurrentHashMap<>();
 
     private Object getUserLock(String userId) {

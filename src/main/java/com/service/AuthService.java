@@ -18,17 +18,21 @@ import java.util.UUID;
 @ApplicationScoped
 public class AuthService {
 
-    @Inject
-    PlayerRepository playerRepository;
+    private final PlayerRepository playerRepository;
+    private final TokenService tokenService;
+    private final EmailService emailService;
+    private final String frontendUrl;
 
     @Inject
-    TokenService tokenService;
-
-    @Inject
-    EmailService emailService;
-
-    @ConfigProperty(name = "app.frontend.url", defaultValue = "http://localhost:4200")
-    String frontendUrl;
+    public AuthService(PlayerRepository playerRepository,
+            TokenService tokenService,
+            EmailService emailService,
+            @ConfigProperty(name = "app.frontend.url", defaultValue = "http://localhost:4200") String frontendUrl) {
+        this.playerRepository = playerRepository;
+        this.tokenService = tokenService;
+        this.emailService = emailService;
+        this.frontendUrl = frontendUrl;
+    }
 
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email)) {

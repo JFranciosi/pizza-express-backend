@@ -230,7 +230,6 @@ public class BettingService {
             throw new IllegalStateException("Nessuna scommessa da cancellare (Index " + index + ")");
 
         currentRoundBets.remove(betKey);
-        // Duplicate remove call removed
 
         String txId = UUID.randomUUID().toString();
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
