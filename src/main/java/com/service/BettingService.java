@@ -1,34 +1,42 @@
 package com.service;
 
+import com.dto.CashOutResult;
 import com.model.Bet;
 import com.model.Game;
 import com.model.GameState;
+import com.model.Player;
 import com.repository.PlayerRepository;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 @ApplicationScoped
 public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
-    private final io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands<String, String> zsetCommands;
+    private final ReactiveSortedSetCommands<String, String> zsetCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Inject
     PlayerRepository playerRepository;
 
     @Inject
-    public BettingService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
+    public BettingService(ReactiveRedisDataSource ds) {
         this.zsetCommands = ds.sortedSet(String.class);
     }
 
@@ -67,13 +75,13 @@ public class BettingService {
             }
 
             double finalAmount = round(amount);
-            String txId = java.util.UUID.randomUUID().toString();
+            String txId = UUID.randomUUID().toString();
 
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
             if (!success) {
                 throw new IllegalStateException("Saldo insufficiente o errore transazione");
             }
-            com.model.Player player = playerRepository.findById(userId);
+            Player player = playerRepository.findById(userId);
             String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
 
             Bet bet = new Bet(userId, username, game.getId(), finalAmount, index, avatarUrl);
@@ -130,7 +138,7 @@ public class BettingService {
         bet.setProfit(round(winAmount - bet.getAmount()));
         gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
-        String txId = java.util.UUID.randomUUID().toString();
+        String txId = UUID.randomUUID().toString();
         boolean success = walletService.creditWinnings(userId, winAmount, gameEngine.getCurrentGame().getId(), txId);
 
         if (!success) {
@@ -152,7 +160,7 @@ public class BettingService {
         String multiKey = "leaderboard:multiplier:" + today;
 
         try {
-            Map<String, Object> data = new java.util.HashMap<>();
+            Map<String, Object> data = new HashMap<>();
             data.put("id", bet.getUserId() + "_" + System.currentTimeMillis()); // Unique ID for ZSet member uniqueness
             data.put("username", bet.getUsername());
             data.put("avatarUrl", bet.getAvatarUrl());
@@ -171,7 +179,7 @@ public class BettingService {
         }
     }
 
-    public io.smallrye.mutiny.Uni<List<Map<String, Object>>> getTopBets(String type) {
+    public Uni<List<Map<String, Object>>> getTopBets(String type) {
         String today = LocalDate.now().toString();
         String key = "leaderboard:" + (type.equals("multiplier") ? "multiplier" : "profit") + ":" + today;
 
@@ -179,7 +187,7 @@ public class BettingService {
                 .map(list -> list.stream().map(json -> {
                     try {
                         return objectMapper.readValue(json,
-                                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {
+                                new TypeReference<Map<String, Object>>() {
                                 });
                     } catch (Exception e) {
                         return null;
@@ -215,10 +223,9 @@ public class BettingService {
             throw new IllegalStateException("Nessuna scommessa da cancellare (Index " + index + ")");
 
         currentRoundBets.remove(betKey);
+        // Duplicate remove call removed
 
-        currentRoundBets.remove(betKey);
-
-        String txId = java.util.UUID.randomUUID().toString();
+        String txId = UUID.randomUUID().toString();
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
         LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
@@ -233,18 +240,6 @@ public class BettingService {
 
     private double round(double value) {
         return Math.round(value * 100.0) / 100.0;
-    }
-
-    public static class CashOutResult {
-        public double winAmount;
-        public double newBalance;
-        public double multiplier;
-
-        public CashOutResult(double winAmount, double newBalance, double multiplier) {
-            this.winAmount = winAmount;
-            this.newBalance = newBalance;
-            this.multiplier = multiplier;
-        }
     }
 
     public Map<String, Bet> getCurrentBets() {

@@ -1,7 +1,9 @@
 package com.web;
 
+import com.dto.CashOutResult;
 import com.service.BettingService;
 import com.service.TokenService;
+import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -21,7 +23,7 @@ public class BettingResource {
     public static class BetRequest {
         public double amount;
         public double autoCashout;
-        public int index; // 0 or 1
+        public int index;
     }
 
     @POST
@@ -47,7 +49,7 @@ public class BettingResource {
         try {
             String userId = tokenService.getUserIdFromToken(token);
             int betIndex = (index != null && index == 1) ? 1 : 0;
-            BettingService.CashOutResult result = bettingService.cashOut(userId, betIndex);
+            CashOutResult result = bettingService.cashOut(userId, betIndex);
             return Response.ok(result).build();
         } catch (IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
@@ -73,7 +75,7 @@ public class BettingResource {
 
     @GET
     @Path("/top")
-    public io.smallrye.mutiny.Uni<Response> getTopBets(@QueryParam("type") String type) {
+    public Uni<Response> getTopBets(@QueryParam("type") String type) {
         if (type == null || (!type.equals("profit") && !type.equals("multiplier"))) {
             type = "profit";
         }

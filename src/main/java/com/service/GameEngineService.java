@@ -3,12 +3,22 @@ package com.service;
 import com.model.Game;
 import com.model.GameState;
 import com.web.GameSocket;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.hash.ReactiveHashCommands;
+import io.quarkus.redis.datasource.list.ReactiveListCommands;
+import io.quarkus.runtime.Startup;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.Vertx;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -21,11 +31,9 @@ public class GameEngineService {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean startingNewRound = false;
 
-    // Configurazione gioco
-    private static final long WAITING_TIME_MS = 10000; // 10 secondi di attesa
-    private static final double GROWTH_RATE = 0.00006; // Velocità di crescita (da calibrare)
+    private static final long WAITING_TIME_MS = 10000;
+    private static final double GROWTH_RATE = 0.00006;
 
-    // Stato interno per il loop
     private long roundStartTime;
     private long timerId;
 
@@ -39,18 +47,18 @@ public class GameEngineService {
     ProvablyFairService provablyFairService; // [NEW]
 
     @Inject
-    io.vertx.core.Vertx vertx;
+    Vertx vertx;
 
-    private final io.quarkus.redis.datasource.hash.ReactiveHashCommands<String, String, String> hashCommands;
-    private final io.quarkus.redis.datasource.list.ReactiveListCommands<String, String> listCommands;
+    private final ReactiveHashCommands<String, String, String> hashCommands;
+    private final ReactiveListCommands<String, String> listCommands;
 
     @Inject
-    public GameEngineService(io.quarkus.redis.datasource.ReactiveRedisDataSource ds) {
+    public GameEngineService(ReactiveRedisDataSource ds) {
         this.hashCommands = ds.hash(String.class);
         this.listCommands = ds.list(String.class);
     }
 
-    @io.quarkus.runtime.Startup
+    @Startup
     void init() {
         if (currentGame == null) {
             startNewRound();
@@ -59,7 +67,7 @@ public class GameEngineService {
         }
     }
 
-    @jakarta.annotation.PreDestroy
+    @PreDestroy
     void destroy() {
         vertx.cancelTimer(timerId);
     }
@@ -104,7 +112,6 @@ public class GameEngineService {
 
     private long lastSecondsBroadcast = -1;
 
-    // Rimosso @Scheduled, ora chiamato da Vert.x
     void gameLoop() {
         if (currentGame == null)
             return;
@@ -130,7 +137,7 @@ public class GameEngineService {
                 break;
 
             case CRASHED:
-                if (now >= roundStartTime + 3000) { // Allungato a 3s per leggere risultato
+                if (now >= roundStartTime + 3000) {
                     startNewRound();
                 }
                 break;
@@ -193,7 +200,7 @@ public class GameEngineService {
     }
 
     private void saveGameToRedis() {
-        java.util.Map<String, String> data = new java.util.HashMap<>();
+        Map<String, String> data = new HashMap<>();
         data.put("id", currentGame.getId());
         data.put("status", currentGame.getStatus().name());
         data.put("multiplier", String.valueOf(currentGame.getMultiplier()));
@@ -211,7 +218,6 @@ public class GameEngineService {
             }
         } else {
             data.put("crashPoint", "HIDDEN");
-            // Secret not sent
         }
 
         hashCommands.hset("game:current", data)
@@ -224,7 +230,6 @@ public class GameEngineService {
     }
 
     private void saveToHistory(double crashPoint) {
-        // Save format: CrashPoint:Seed
         String historyEntry = crashPoint + ":" + currentGame.getSecret();
         listCommands.lpush("game:history", historyEntry)
                 .chain(v -> listCommands.ltrim("game:history", 0, 199))
@@ -236,17 +241,15 @@ public class GameEngineService {
                 });
     }
 
-    // Removed old RNG methods (generateCrashPoint, generateHash, bytesToHex)
-
     public Game getCurrentGame() {
         return currentGame;
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getHistory() {
+    public Uni<List<String>> getHistory() {
         return listCommands.lrange("game:history", 0, 199);
     }
 
-    public io.smallrye.mutiny.Uni<java.util.List<String>> getFullHistory(int limit) {
+    public Uni<List<String>> getFullHistory(int limit) {
         int max = Math.min(limit, 200);
         return listCommands.lrange("game:history", 0, max - 1);
     }
