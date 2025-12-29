@@ -37,25 +37,25 @@ public class GameEngineService {
     private long roundStartTime;
     private long timerId;
 
-    @Inject
-    GameSocket gameSocket;
-
-    @Inject
-    BettingService bettingService;
-
-    @Inject
-    ProvablyFairService provablyFairService; // [NEW]
-
-    @Inject
-    Vertx vertx;
-
+    private final GameSocket gameSocket;
+    private final BettingService bettingService;
+    private final ProvablyFairService provablyFairService;
+    private final Vertx vertx;
     private final ReactiveHashCommands<String, String, String> hashCommands;
     private final ReactiveListCommands<String, String> listCommands;
 
     @Inject
-    public GameEngineService(ReactiveRedisDataSource ds) {
+    public GameEngineService(ReactiveRedisDataSource ds,
+            GameSocket gameSocket,
+            BettingService bettingService,
+            ProvablyFairService provablyFairService,
+            Vertx vertx) {
         this.hashCommands = ds.hash(String.class);
         this.listCommands = ds.list(String.class);
+        this.gameSocket = gameSocket;
+        this.bettingService = bettingService;
+        this.provablyFairService = provablyFairService;
+        this.vertx = vertx;
     }
 
     @Startup

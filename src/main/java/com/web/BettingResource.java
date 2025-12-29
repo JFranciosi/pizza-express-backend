@@ -14,11 +14,14 @@ import jakarta.ws.rs.core.Response;
 @Produces(MediaType.APPLICATION_JSON)
 public class BettingResource {
 
-    @Inject
-    BettingService bettingService;
+    private final BettingService bettingService;
+    private final TokenService tokenService;
 
     @Inject
-    TokenService tokenService;
+    public BettingResource(BettingService bettingService, TokenService tokenService) {
+        this.bettingService = bettingService;
+        this.tokenService = tokenService;
+    }
 
     public static class BetRequest {
         public double amount;

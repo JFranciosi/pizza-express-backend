@@ -11,6 +11,7 @@ import io.quarkus.redis.datasource.sortedset.ReactiveSortedSetCommands;
 import io.quarkus.redis.datasource.sortedset.ZRangeArgs;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -32,26 +33,31 @@ public class BettingService {
     private final ReactiveSortedSetCommands<String, String> zsetCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Inject
-    PlayerRepository playerRepository;
+    private final PlayerRepository playerRepository;
+    private final Instance<GameEngineService> gameEngineInstance;
+    private final WalletService walletService;
 
     @Inject
-    public BettingService(ReactiveRedisDataSource ds) {
+    public BettingService(ReactiveRedisDataSource ds,
+            PlayerRepository playerRepository,
+            Instance<GameEngineService> gameEngineInstance,
+            WalletService walletService) {
         this.zsetCommands = ds.sortedSet(String.class);
+        this.playerRepository = playerRepository;
+        this.gameEngineInstance = gameEngineInstance;
+        this.walletService = walletService;
     }
 
-    @Inject
-    GameEngineService gameEngine;
-
-    @Inject
-    WalletService walletService;
+    private GameEngineService getGameEngine() {
+        return gameEngineInstance.get();
+    }
 
     private String getBetKey(String userId, int index) {
         return userId + ":" + index;
     }
 
     public void placeBet(String userId, String username, double amount, double autoCashout, int index) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
 
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException(
@@ -93,7 +99,7 @@ public class BettingService {
         String avatarApiUrl = (avatarUrl != null && !avatarUrl.isEmpty()) ? "/users/" + userId + "/avatar" : "";
 
         LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
-        gameEngine.broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
+        getGameEngine().broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
     public CashOutResult cashOut(String userId, int index) {
@@ -101,7 +107,7 @@ public class BettingService {
     }
 
     public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
         if (game == null) {
             throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
         }
@@ -136,10 +142,11 @@ public class BettingService {
 
         bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
-        gameEngine.broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+        getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
         String txId = UUID.randomUUID().toString();
-        boolean success = walletService.creditWinnings(userId, winAmount, gameEngine.getCurrentGame().getId(), txId);
+        boolean success = walletService.creditWinnings(userId, winAmount, getGameEngine().getCurrentGame().getId(),
+                txId);
 
         if (!success) {
             LOG.error("CRITICAL: Failed to credit winnings for user " + userId);
@@ -211,7 +218,7 @@ public class BettingService {
     }
 
     public void cancelBet(String userId, int index) {
-        Game game = gameEngine.getCurrentGame();
+        Game game = getGameEngine().getCurrentGame();
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException("Non puoi cancellare la scommessa ora.");
         }
@@ -229,7 +236,7 @@ public class BettingService {
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
         LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
-        gameEngine.broadcast("CANCEL_BET:" + userId + ":" + index);
+        getGameEngine().broadcast("CANCEL_BET:" + userId + ":" + index);
     }
 
     public List<Bet> resetBetsForNewRound() {
