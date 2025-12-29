@@ -31,6 +31,7 @@ public class BettingService {
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
     private final ReactiveSortedSetCommands<String, String> zsetCommands;
+    private final io.quarkus.redis.datasource.keys.ReactiveKeyCommands<String> keyCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final PlayerRepository playerRepository;
@@ -43,6 +44,7 @@ public class BettingService {
             Instance<GameEngineService> gameEngineInstance,
             WalletService walletService) {
         this.zsetCommands = ds.sortedSet(String.class);
+        this.keyCommands = ds.key(String.class);
         this.playerRepository = playerRepository;
         this.gameEngineInstance = gameEngineInstance;
         this.walletService = walletService;
@@ -167,19 +169,23 @@ public class BettingService {
         String multiKey = "leaderboard:multiplier:" + today;
 
         try {
-            Map<String, Object> data = new HashMap<>();
-            data.put("id", bet.getUserId() + "_" + System.currentTimeMillis()); // Unique ID for ZSet member uniqueness
-            data.put("username", bet.getUsername());
-            data.put("avatarUrl", bet.getAvatarUrl());
-            data.put("betAmount", bet.getAmount());
-            data.put("profit", bet.getProfit());
-            data.put("multiplier", bet.getCashOutMultiplier());
-            data.put("timestamp", System.currentTimeMillis());
+            String compactData = String.join("|",
+                    bet.getUserId(),
+                    bet.getUsername(),
+                    String.valueOf(bet.getAmount()),
+                    String.valueOf(bet.getProfit()),
+                    String.valueOf(bet.getCashOutMultiplier()),
+                    String.valueOf(System.currentTimeMillis()));
 
-            String json = objectMapper.writeValueAsString(data);
-            zsetCommands.zadd(profitKey, bet.getProfit(), json).subscribe().with(v -> {
+            zsetCommands.zadd(profitKey, bet.getProfit(), compactData).subscribe().with(v -> {
+                // Set TTL to 48 hours (2 days) to allow viewing yesterday's history
+                keyCommands.expire(profitKey, 172800).subscribe().with(x -> {
+                }, t -> LOG.error("TTL Profit Error", t));
             }, t -> LOG.error("Redis Profit Error", t));
-            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), json).subscribe().with(v -> {
+
+            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), compactData).subscribe().with(v -> {
+                keyCommands.expire(multiKey, 172800).subscribe().with(x -> {
+                }, t -> LOG.error("TTL Multi Error", t));
             }, t -> LOG.error("Redis Multi Error", t));
         } catch (Exception e) {
             LOG.error("Error saving to leaderboard", e);
@@ -191,11 +197,29 @@ public class BettingService {
         String key = "leaderboard:" + (type.equals("multiplier") ? "multiplier" : "profit") + ":" + today;
 
         return zsetCommands.zrange(key, 0L, 9L, new ZRangeArgs().rev())
-                .map(list -> list.stream().map(json -> {
+                .map(list -> list.stream().map(dataString -> {
                     try {
-                        return objectMapper.readValue(json,
-                                new TypeReference<Map<String, Object>>() {
-                                });
+                        Map<String, Object> map = new HashMap<>();
+                        if (dataString.contains("|")) {
+                            String[] parts = dataString.split("\\|");
+                            if (parts.length >= 6) {
+                                map.put("id", parts[0] + "_" + parts[5]);
+                                map.put("userId", parts[0]);
+                                map.put("username", parts[1]);
+                                map.put("betAmount", Double.parseDouble(parts[2]));
+                                map.put("profit", Double.parseDouble(parts[3]));
+                                map.put("multiplier", Double.parseDouble(parts[4]));
+                                map.put("timestamp", Long.parseLong(parts[5]));
+
+                                // Reconstruct Avatar API URL
+                                map.put("avatarUrl", "/users/" + parts[0] + "/avatar");
+                                return map;
+                            }
+                        }
+
+                        // Fallback: Try parsing old JSON format
+                        return objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
+                        });
                     } catch (Exception e) {
                         return null;
                     }
