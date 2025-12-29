@@ -3,7 +3,6 @@ package com.web;
 import com.dto.CashOutResult;
 import com.service.BettingService;
 import com.service.TokenService;
-import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -35,7 +34,6 @@ public class BettingResource {
         try {
             String userId = tokenService.getUserIdFromToken(token);
             String username = tokenService.getUsernameFromToken(token);
-            // Default index 0 if not provided
             int betIndex = (req.index == 1) ? 1 : 0;
             bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex);
             return Response.ok().build();
@@ -78,14 +76,16 @@ public class BettingResource {
 
     @GET
     @Path("/top")
-    public Uni<Response> getTopBets(@QueryParam("type") String type) {
+    @io.smallrye.common.annotation.RunOnVirtualThread
+    public Response getTopBets(@QueryParam("type") String type) {
         if (type == null || (!type.equals("profit") && !type.equals("multiplier"))) {
             type = "profit";
         }
-        return bettingService.getTopBets(type)
-                .map(list -> Response.ok(list).build())
-                .onFailure().recoverWithItem(
-                        t -> Response.serverError().entity(new ErrorResponse("Error fetching top bets")).build());
+        try {
+            return Response.ok(bettingService.getTopBets(type)).build();
+        } catch (Exception e) {
+            return Response.serverError().entity(new ErrorResponse("Error fetching top bets")).build();
+        }
     }
 
     public static class ErrorResponse {

@@ -139,38 +139,4 @@ public class PlayerRepository {
         keyCommands.del("reset_token:" + token);
     }
 
-    public String scanAndFixZeroBalances() {
-        StringBuilder report = new StringBuilder();
-        int count = 0;
-        Iterable<String> keys = keyCommands.keys("player:*");
-        report.append("Starting scan...\n");
-
-        for (String key : keys) {
-            if (key.contains(":email:") || key.contains(":username:")) {
-                continue;
-            }
-
-            try {
-                String balanceStr = hashCommands.hget(key, "balance");
-
-                if (balanceStr != null) {
-                    double balance = Double.parseDouble(balanceStr);
-                    if (balance < 0.10) {
-                        String playerId = key.substring(7);
-                        markZeroBalance(playerId);
-                        count++;
-                        report.append("✅ QUEUED: ").append(key).append(" (Bal: ").append(balanceStr).append(")\n");
-                    } else {
-                        report.append("➖ IGNORED: ").append(key).append(" (Bal: ").append(balanceStr).append(")\n");
-                    }
-                } else {
-                    report.append("❓ NO BALANCE: ").append(key).append("\n");
-                }
-            } catch (Exception e) {
-                report.append("❌ ERROR: ").append(key).append(" - ").append(e.getMessage()).append("\n");
-            }
-        }
-        report.append("Done. Queued ").append(count).append(" users.");
-        return report.toString();
-    }
 }

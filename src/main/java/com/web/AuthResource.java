@@ -16,17 +16,13 @@ import jakarta.ws.rs.core.Response;
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@io.smallrye.common.annotation.RunOnVirtualThread
 public class AuthResource {
 
-    public static class ChangePasswordRequest {
-        public String userId;
-        public String oldPass;
-        public String newPass;
+    public record ChangePasswordRequest(String userId, String oldPass, String newPass) {
     }
 
-    public static class UpdateProfileRequest {
-        public String email;
-        public String password;
+    public record UpdateProfileRequest(String email, String password) {
     }
 
     public static class AvatarUploadRequest {
@@ -50,7 +46,7 @@ public class AuthResource {
             ChangePasswordRequest req) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
-            authService.changePassword(userId, req.oldPass, req.newPass);
+            authService.changePassword(userId, req.oldPass(), req.newPass());
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -64,7 +60,7 @@ public class AuthResource {
             UpdateProfileRequest req) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
-            authService.updateEmail(userId, req.email, req.password);
+            authService.updateEmail(userId, req.email(), req.password());
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)

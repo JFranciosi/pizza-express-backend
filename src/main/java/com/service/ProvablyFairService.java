@@ -1,8 +1,8 @@
 package com.service;
 
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.list.ReactiveListCommands;
-import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.list.ListCommands;
+import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.runtime.Startup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,11 +21,11 @@ public class ProvablyFairService {
     private static final String SEED_KEY = "provably:seed";
     private static final int CHAIN_LENGTH = 10000;
 
-    private final ReactiveListCommands<String, String> listCommands;
-    private final ReactiveValueCommands<String, String> valueCommands;
+    private final ListCommands<String, String> listCommands;
+    private final ValueCommands<String, String> valueCommands;
 
     @Inject
-    public ProvablyFairService(ReactiveRedisDataSource ds) {
+    public ProvablyFairService(RedisDataSource ds) {
         this.listCommands = ds.list(String.class);
         this.valueCommands = ds.value(String.class);
     }
@@ -36,7 +36,7 @@ public class ProvablyFairService {
     }
 
     private void checkAndGenerateChain() {
-        Long size = listCommands.llen(CHAIN_KEY).await().indefinitely();
+        Long size = listCommands.llen(CHAIN_KEY);
         if (size == 0) {
             LOG.info("Generating new Provably Fair Hash Chain of size " + CHAIN_LENGTH + "...");
             generateChain(CHAIN_LENGTH);
@@ -48,23 +48,21 @@ public class ProvablyFairService {
 
     public void generateChain(int count) {
         String currentHash = UUID.randomUUID().toString();
-        valueCommands.set(SEED_KEY, currentHash).await().indefinitely();
+        valueCommands.set(SEED_KEY, currentHash);
         for (int i = 0; i < count; i++) {
             currentHash = sha256(currentHash);
-            listCommands.lpush(CHAIN_KEY, currentHash).await().indefinitely();
+            listCommands.lpush(CHAIN_KEY, currentHash);
         }
     }
 
-    public io.smallrye.mutiny.Uni<String> popNextHash() {
-        return listCommands.lpop(CHAIN_KEY)
-                .flatMap(hash -> {
-                    if (hash == null) {
-                        LOG.warn("Hash Chain exhausted! Regenerating...");
-                        generateChain(CHAIN_LENGTH);
-                        return listCommands.lpop(CHAIN_KEY);
-                    }
-                    return io.smallrye.mutiny.Uni.createFrom().item(hash);
-                });
+    public String popNextHash() {
+        String hash = listCommands.lpop(CHAIN_KEY);
+        if (hash == null) {
+            LOG.warn("Hash Chain exhausted! Regenerating...");
+            generateChain(CHAIN_LENGTH);
+            return listCommands.lpop(CHAIN_KEY);
+        }
+        return hash;
     }
 
     public double calculateCrashPoint(String hash) {

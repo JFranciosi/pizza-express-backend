@@ -2,8 +2,8 @@ package com.service;
 
 import com.model.Player;
 import com.repository.PlayerRepository;
-import io.quarkus.redis.datasource.ReactiveRedisDataSource;
-import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.redis.datasource.value.SetArgs;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,10 +19,10 @@ public class LocalRedisWalletService implements WalletService {
     private static final Duration PROCESSED_TX_TTL = Duration.ofHours(24);
 
     private final PlayerRepository playerRepository;
-    private final ReactiveValueCommands<String, String> valueCommands;
+    private final ValueCommands<String, String> valueCommands;
 
     @Inject
-    public LocalRedisWalletService(ReactiveRedisDataSource ds, PlayerRepository playerRepository) {
+    public LocalRedisWalletService(RedisDataSource ds, PlayerRepository playerRepository) {
         this.valueCommands = ds.value(String.class);
         this.playerRepository = playerRepository;
     }
@@ -119,12 +119,11 @@ public class LocalRedisWalletService implements WalletService {
     }
 
     private boolean isTransactionProcessed(String transactionId) {
-        return valueCommands.get(IDEMPOTENCY_PREFIX + transactionId).await().indefinitely() != null;
+        return valueCommands.get(IDEMPOTENCY_PREFIX + transactionId) != null;
     }
 
     private void markTransactionAsProcessed(String transactionId) {
-        valueCommands.set(IDEMPOTENCY_PREFIX + transactionId, "PROCESSED", new SetArgs().ex(PROCESSED_TX_TTL))
-                .await().indefinitely();
+        valueCommands.set(IDEMPOTENCY_PREFIX + transactionId, "PROCESSED", new SetArgs().ex(PROCESSED_TX_TTL));
     }
 
     private double round(double value) {

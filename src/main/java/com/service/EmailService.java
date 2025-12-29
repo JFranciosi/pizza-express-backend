@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
+@io.smallrye.common.annotation.RunOnVirtualThread
 public class EmailService {
 
     private final Mailer mailer;
