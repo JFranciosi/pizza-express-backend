@@ -2,17 +2,23 @@ package com.web;
 
 import com.service.AuthService;
 import com.web.model.*;
+import io.smallrye.common.annotation.RunOnVirtualThread;
+import io.smallrye.jwt.auth.principal.ParseException;
 import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.resteasy.reactive.RestForm;
+import org.jboss.resteasy.reactive.multipart.FileUpload;
+
+import java.io.IOException;
 
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@io.smallrye.common.annotation.RunOnVirtualThread
+@RunOnVirtualThread
 public class AuthResource {
 
     public record ChangePasswordRequest(String userId, String oldPass, String newPass) {
@@ -22,8 +28,8 @@ public class AuthResource {
     }
 
     public static class AvatarUploadRequest {
-        @org.jboss.resteasy.reactive.RestForm("file")
-        public org.jboss.resteasy.reactive.multipart.FileUpload file;
+        @RestForm("file")
+        public FileUpload file;
     }
 
     private final AuthService authService;
@@ -42,70 +48,54 @@ public class AuthResource {
     @POST
     @Path("/change-password")
     public Response changePassword(@HeaderParam("Authorization") String token,
-            ChangePasswordRequest req) {
-        try {
-            String userId = tokenService.getUserIdFromToken(token);
-            authService.changePassword(userId, req.oldPass(), req.newPass());
-            return Response.ok().build();
-        } catch (Exception e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
-        }
+            ChangePasswordRequest req) throws ParseException {
+        String userId = tokenService.getUserIdFromToken(token);
+        authService.changePassword(userId, req.oldPass(), req.newPass());
+        return Response.ok().build();
     }
 
     @POST
     @Path("/update-profile")
     public Response updateProfile(@HeaderParam("Authorization") String token,
-            UpdateProfileRequest req) {
-        try {
-            String userId = tokenService.getUserIdFromToken(token);
-            authService.updateEmail(userId, req.email(), req.password());
-            return Response.ok().build();
-        } catch (Exception e) {
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
-        }
+            UpdateProfileRequest req) throws ParseException {
+        String userId = tokenService.getUserIdFromToken(token);
+        authService.updateEmail(userId, req.email(), req.password());
+        return Response.ok().build();
     }
 
     @POST
     @Path("/upload-avatar")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     public Response uploadAvatar(@HeaderParam("Authorization") String token,
-            AvatarUploadRequest req) {
-        try {
-            String userId = tokenService.getUserIdFromToken(token);
+            AvatarUploadRequest req) throws ParseException, IOException {
+        String userId = tokenService.getUserIdFromToken(token);
 
-            if (req.file == null) {
-                return Response.status(Response.Status.BAD_REQUEST).entity("File is required").build();
-            }
-
-            if (req.file.size() > 2 * 1024 * 1024) {
-                return Response.status(Response.Status.BAD_REQUEST).entity("File too large (max 2MB)").build();
-            }
-
-            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(req.file.filePath().toFile());
-            if (image == null) {
-                return Response.status(Response.Status.BAD_REQUEST).entity("Invalid image file or format").build();
-            }
-
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            javax.imageio.ImageIO.write(image, "jpg", baos);
-            byte[] sanitizedBytes = baos.toByteArray();
-
-            String base64Img = java.util.Base64.getEncoder().encodeToString(sanitizedBytes);
-            String avatarUrl = "data:image/jpeg;base64," + base64Img;
-
-            authService.updateAvatar(userId, avatarUrl);
-            return Response.ok(new java.util.HashMap<String, String>() {
-                {
-                    put("avatarUrl", avatarUrl);
-                }
-            }).build();
-        } catch (Exception e) {
-            e.printStackTrace();
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
+        if (req.file == null) {
+            throw new BadRequestException("File is required");
         }
+
+        if (req.file.size() > 2 * 1024 * 1024) {
+            throw new BadRequestException("File too large (max 2MB)");
+        }
+
+        java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(req.file.filePath().toFile());
+        if (image == null) {
+            throw new BadRequestException("Invalid image file or format");
+        }
+
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(image, "jpg", baos);
+        byte[] sanitizedBytes = baos.toByteArray();
+
+        String base64Img = java.util.Base64.getEncoder().encodeToString(sanitizedBytes);
+        String avatarUrl = "data:image/jpeg;base64," + base64Img;
+
+        authService.updateAvatar(userId, avatarUrl);
+        return Response.ok(new java.util.HashMap<String, String>() {
+            {
+                put("avatarUrl", avatarUrl);
+            }
+        }).build();
     }
 
     @POST
@@ -150,7 +140,7 @@ public class AuthResource {
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new ErrorResponse(e.getMessage())).build();
         }
     }
 
@@ -163,7 +153,7 @@ public class AuthResource {
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new ErrorResponse(e.getMessage())).build();
         }
     }
 

@@ -1,6 +1,7 @@
 package com.web;
 
 import com.dto.CashOutResult;
+import com.web.model.ErrorResponse;
 import com.service.BettingService;
 import com.service.TokenService;
 import io.smallrye.common.annotation.RunOnVirtualThread;
@@ -89,11 +90,4 @@ public class BettingResource {
         }
     }
 
-    public static class ErrorResponse {
-        public String error;
-
-        public ErrorResponse(String error) {
-            this.error = error;
-        }
-    }
 }
