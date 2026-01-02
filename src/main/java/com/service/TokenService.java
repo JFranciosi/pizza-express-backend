@@ -1,7 +1,11 @@
 package com.service;
 
+import io.smallrye.jwt.auth.principal.JWTParser;
+import io.smallrye.jwt.auth.principal.ParseException;
 import io.smallrye.jwt.build.Jwt;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Set;
@@ -10,10 +14,10 @@ import java.util.Set;
 public class TokenService {
 
     private final CryptoService cryptoService;
-    private final io.smallrye.jwt.auth.principal.JWTParser parser;
+    private final JWTParser parser;
 
-    @jakarta.inject.Inject
-    public TokenService(CryptoService cryptoService, io.smallrye.jwt.auth.principal.JWTParser parser) {
+    @Inject
+    public TokenService(CryptoService cryptoService, JWTParser parser) {
         this.cryptoService = cryptoService;
         this.parser = parser;
     }
@@ -38,15 +42,14 @@ public class TokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    public String getUserIdFromToken(String token) throws io.smallrye.jwt.auth.principal.ParseException {
-        // Remove "Bearer " prefix if present
+    public String getUserIdFromToken(String token) throws ParseException {
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }
         return parser.parse(token).getClaim("userId");
     }
 
-    public String getUsernameFromToken(String token) throws io.smallrye.jwt.auth.principal.ParseException {
+    public String getUsernameFromToken(String token) throws ParseException {
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }

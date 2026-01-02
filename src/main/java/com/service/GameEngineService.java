@@ -96,15 +96,7 @@ public class GameEngineService {
         startingNewRound = true;
 
         try {
-            // Provably Fair (Sync)
-            // Assuming provablyFairService is updated to be sync or we block waiting for it
-            // Ideally refactor ProvablyFairService to sync too. For now let's assume it
-            // returns Uni and we block?
-            // Better: update ProvablyFairService to be sync.
-            // Temporary: Blocking get
             String gameSeed = provablyFairService.popNextHash();
-            // ProvablyFairService
-
             currentGame = new Game();
             currentGame.setId(UUID.randomUUID().toString());
             currentGame.setStatus(GameState.WAITING);

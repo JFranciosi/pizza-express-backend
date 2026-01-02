@@ -2,6 +2,7 @@ package com.web;
 
 import com.model.Player;
 import com.repository.PlayerRepository;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -11,7 +12,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.Base64;
 
 @Path("/users")
-@io.smallrye.common.annotation.RunOnVirtualThread
+@RunOnVirtualThread
 public class UserResource {
 
     private final PlayerRepository playerRepository;

@@ -3,6 +3,7 @@ package com.web;
 import com.dto.CashOutResult;
 import com.service.BettingService;
 import com.service.TokenService;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -76,7 +77,7 @@ public class BettingResource {
 
     @GET
     @Path("/top")
-    @io.smallrye.common.annotation.RunOnVirtualThread
+    @RunOnVirtualThread
     public Response getTopBets(@QueryParam("type") String type) {
         if (type == null || (!type.equals("profit") && !type.equals("multiplier"))) {
             type = "profit";

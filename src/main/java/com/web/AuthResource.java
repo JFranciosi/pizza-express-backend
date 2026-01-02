@@ -41,7 +41,7 @@ public class AuthResource {
 
     @POST
     @Path("/change-password")
-    public Response changePassword(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+    public Response changePassword(@HeaderParam("Authorization") String token,
             ChangePasswordRequest req) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
@@ -49,13 +49,13 @@ public class AuthResource {
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
         }
     }
 
     @POST
     @Path("/update-profile")
-    public Response updateProfile(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+    public Response updateProfile(@HeaderParam("Authorization") String token,
             UpdateProfileRequest req) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
@@ -63,14 +63,14 @@ public class AuthResource {
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
         }
     }
 
     @POST
     @Path("/upload-avatar")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
-    public Response uploadAvatar(@jakarta.ws.rs.HeaderParam("Authorization") String token,
+    public Response uploadAvatar(@HeaderParam("Authorization") String token,
             AvatarUploadRequest req) {
         try {
             String userId = tokenService.getUserIdFromToken(token);
@@ -104,7 +104,7 @@ public class AuthResource {
         } catch (Exception e) {
             e.printStackTrace();
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
         }
     }
 
@@ -150,7 +150,7 @@ public class AuthResource {
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
         }
     }
 

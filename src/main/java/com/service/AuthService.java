@@ -7,6 +7,8 @@ import com.web.model.AuthResponse;
 import com.web.model.LoginRequest;
 import com.web.model.RegisterRequest;
 import com.web.model.RefreshRequest;
+import com.web.model.ForgotPasswordRequest;
+import com.web.model.ResetPasswordRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -156,7 +158,7 @@ public class AuthService {
         playerRepository.save(player);
     }
 
-    public void forgotPassword(com.web.model.ForgotPasswordRequest req) {
+    public void forgotPassword(ForgotPasswordRequest req) {
         Player player = playerRepository.findByEmail(req.email());
         if (player == null) {
             return;
@@ -169,7 +171,7 @@ public class AuthService {
         emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
     }
 
-    public void resetPassword(com.web.model.ResetPasswordRequest req) {
+    public void resetPassword(ResetPasswordRequest req) {
         String playerId = playerRepository.validateResetToken(req.token());
         if (playerId == null) {
             throw new BadRequestException("Invalid or expired token");

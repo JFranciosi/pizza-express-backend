@@ -3,6 +3,7 @@ package com.service;
 import com.model.Player;
 import com.repository.PlayerRepository;
 import io.quarkus.scheduler.Scheduled;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -24,7 +25,7 @@ public class RefillScheduler {
     }
 
     @Scheduled(every = "5m")
-    @io.smallrye.common.annotation.RunOnVirtualThread
+    @RunOnVirtualThread
     void processRefills() {
         LOG.info("Running Auto-Refill check...");
         long now = System.currentTimeMillis();
