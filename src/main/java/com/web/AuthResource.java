@@ -14,10 +14,10 @@ import jakarta.validation.Valid;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import static javax.imageio.ImageIO.read;
-import static javax.imageio.ImageIO.write;
+import java.nio.file.Files;
+import java.util.Base64;
+import java.util.HashMap;
 
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
@@ -70,7 +70,7 @@ public class AuthResource {
     @POST
     @Path("/upload-avatar")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
-    @io.quarkus.security.Authenticated
+    @Authenticated
     public Response uploadAvatar(AvatarUploadRequest req) throws IOException {
         String userId = jwt.getClaim("userId");
 
@@ -82,24 +82,56 @@ public class AuthResource {
             throw new BadRequestException("File too large (max 2MB)");
         }
 
-        java.awt.image.BufferedImage image = read(req.file.filePath().toFile());
-        if (image == null) {
-            throw new BadRequestException("Invalid image file or format");
+        byte[] fileBytes = Files.readAllBytes(req.file.filePath());
+        String mimeType = detectMimeType(fileBytes);
+
+        if (mimeType == null) {
+            throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, SVG, ICO");
         }
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        write(image, "jpg", baos);
-        byte[] sanitizedBytes = baos.toByteArray();
-
-        String base64Img = java.util.Base64.getEncoder().encodeToString(sanitizedBytes);
-        String avatarUrl = "data:image/jpeg;base64," + base64Img;
+        String base64Img = Base64.getEncoder().encodeToString(fileBytes);
+        String avatarUrl = "data:" + mimeType + ";base64," + base64Img;
 
         authService.updateAvatar(userId, avatarUrl);
-        return Response.ok(new java.util.HashMap<String, String>() {
+        return Response.ok(new HashMap<String, String>() {
             {
                 put("avatarUrl", avatarUrl);
             }
         }).build();
+    }
+
+    private String detectMimeType(byte[] data) {
+        if (data.length < 12)
+            return null;
+
+        if ((data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8 && (data[2] & 0xFF) == 0xFF) {
+            return "image/jpeg";
+        }
+
+        if ((data[0] & 0xFF) == 0x89 && (data[1] & 0xFF) == 0x50 && (data[2] & 0xFF) == 0x4E &&
+                (data[3] & 0xFF) == 0x47 && (data[4] & 0xFF) == 0x0D && (data[5] & 0xFF) == 0x0A &&
+                (data[6] & 0xFF) == 0x1A && (data[7] & 0xFF) == 0x0A) {
+            return "image/png";
+        }
+
+        if ((data[0] & 0xFF) == 0x52 && (data[1] & 0xFF) == 0x49 && (data[2] & 0xFF) == 0x46 && (data[3] & 0xFF) == 0x46
+                &&
+                (data[8] & 0xFF) == 0x57 && (data[9] & 0xFF) == 0x45 && (data[10] & 0xFF) == 0x42
+                && (data[11] & 0xFF) == 0x50) {
+            return "image/webp";
+        }
+
+        if ((data[0] & 0xFF) == 0x00 && (data[1] & 0xFF) == 0x00 && (data[2] & 0xFF) == 0x01
+                && (data[3] & 0xFF) == 0x00) {
+            return "image/x-icon";
+        }
+
+        String header = new String(data, 0, Math.min(data.length, 100)).trim().toLowerCase();
+        if (header.startsWith("<?xml") || header.contains("<svg")) {
+            return "image/svg+xml";
+        }
+
+        return null;
     }
 
     @POST
