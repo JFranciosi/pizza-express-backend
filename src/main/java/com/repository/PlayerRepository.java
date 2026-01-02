@@ -9,9 +9,12 @@ import io.quarkus.redis.datasource.value.SetArgs;
 import io.quarkus.redis.datasource.sortedset.ZAddArgs;
 import io.quarkus.redis.datasource.sortedset.ScoreRange;
 import io.quarkus.redis.datasource.sortedset.ScoredValue;
+import io.quarkus.redis.datasource.sortedset.SortedSetCommands;
 import jakarta.enterprise.context.ApplicationScoped;
 
+import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import org.jboss.logging.Logger;
 
 @ApplicationScoped
@@ -22,7 +25,7 @@ public class PlayerRepository {
     private final HashCommands<String, String, String> hashCommands;
     private final ValueCommands<String, String> valueCommands;
     private final KeyCommands<String> keyCommands;
-    private final io.quarkus.redis.datasource.sortedset.SortedSetCommands<String, String> sortedSetCommands;
+    private final SortedSetCommands<String, String> sortedSetCommands;
 
     public PlayerRepository(RedisDataSource ds) {
         this.hashCommands = ds.hash(String.class);
@@ -41,14 +44,14 @@ public class PlayerRepository {
         sortedSetCommands.zrem("player:zero_balance", playerId);
     }
 
-    public java.util.List<String> findEligibleForRefill(long cutoffTime) {
+    public List<String> findEligibleForRefill(long cutoffTime) {
         return sortedSetCommands.zrangebyscore("player:zero_balance",
                 ScoreRange.from(0.0, cutoffTime));
     }
 
     public void save(Player player) {
         String key = "player:" + player.getId();
-        java.util.Map<String, String> data = new java.util.HashMap<>();
+        Map<String, String> data = new HashMap<>();
         data.put("id", player.getId());
         data.put("username", player.getUsername());
         data.put("email", player.getEmail());
@@ -80,7 +83,7 @@ public class PlayerRepository {
                 data.get("username"),
                 data.get("email"),
                 data.get("password"),
-                Double.parseDouble(data.get("balance")));
+                parseDoubleSafe(data.get("balance")));
 
         if (data.containsKey("avatarUrl")) {
             player.setAvatarUrl(data.get("avatarUrl"));
@@ -104,7 +107,6 @@ public class PlayerRepository {
     }
 
     public void ensureIndices(Player player) {
-        // Idempotently ensure lookup keys exist
         valueCommands.set("player:email:" + player.getEmail(), player.getId());
         valueCommands.set("player:username:" + player.getUsername(), player.getId());
     }
@@ -137,6 +139,16 @@ public class PlayerRepository {
 
     public void deleteResetToken(String token) {
         keyCommands.del("reset_token:" + token);
+    }
+
+    private double parseDoubleSafe(String value) {
+        if (value == null)
+            return 0.0;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
     }
 
 }

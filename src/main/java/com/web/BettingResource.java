@@ -1,12 +1,15 @@
 package com.web;
 
 import com.dto.CashOutResult;
+import com.web.model.ErrorResponse;
 import com.service.BettingService;
-import com.service.TokenService;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.jwt.JsonWebToken;
+import io.quarkus.security.Authenticated;
 
 @Path("/bet")
 @Consumes(MediaType.APPLICATION_JSON)
@@ -14,12 +17,12 @@ import jakarta.ws.rs.core.Response;
 public class BettingResource {
 
     private final BettingService bettingService;
-    private final TokenService tokenService;
+    private final JsonWebToken jwt;
 
     @Inject
-    public BettingResource(BettingService bettingService, TokenService tokenService) {
+    public BettingResource(BettingService bettingService, JsonWebToken jwt) {
         this.bettingService = bettingService;
-        this.tokenService = tokenService;
+        this.jwt = jwt;
     }
 
     public static class BetRequest {
@@ -30,25 +33,33 @@ public class BettingResource {
 
     @POST
     @Path("/place")
-    public Response placeBet(@HeaderParam("Authorization") String token, BetRequest req) {
+    @Authenticated
+    public Response placeBet(BetRequest req) {
         try {
-            String userId = tokenService.getUserIdFromToken(token);
-            String username = tokenService.getUsernameFromToken(token);
+            String userId = jwt.getClaim("userId");
+            String username = jwt.getClaim("username");
+
+            if (username == null) {
+                username = jwt.getName();
+            }
+
             int betIndex = (req.index == 1) ? 1 : 0;
             bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex);
             return Response.ok().build();
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
         } catch (Exception e) {
-            return Response.serverError().entity(new ErrorResponse("Errore interno")).build();
+            e.printStackTrace();
+            return Response.serverError().entity(new ErrorResponse("Errore interno: " + e.getMessage())).build();
         }
     }
 
     @POST
     @Path("/cashout")
-    public Response cashOut(@HeaderParam("Authorization") String token, @QueryParam("index") Integer index) {
+    @Authenticated
+    public Response cashOut(@QueryParam("index") Integer index) {
         try {
-            String userId = tokenService.getUserIdFromToken(token);
+            String userId = jwt.getClaim("userId");
             int betIndex = (index != null && index == 1) ? 1 : 0;
             CashOutResult result = bettingService.cashOut(userId, betIndex);
             return Response.ok(result).build();
@@ -61,9 +72,10 @@ public class BettingResource {
 
     @POST
     @Path("/cancel")
-    public Response cancelBet(@HeaderParam("Authorization") String token, @QueryParam("index") Integer index) {
+    @Authenticated
+    public Response cancelBet(@QueryParam("index") Integer index) {
         try {
-            String userId = tokenService.getUserIdFromToken(token);
+            String userId = jwt.getClaim("userId");
             int betIndex = (index != null && index == 1) ? 1 : 0;
             bettingService.cancelBet(userId, betIndex);
             return Response.ok().build();
@@ -76,7 +88,7 @@ public class BettingResource {
 
     @GET
     @Path("/top")
-    @io.smallrye.common.annotation.RunOnVirtualThread
+    @RunOnVirtualThread
     public Response getTopBets(@QueryParam("type") String type) {
         if (type == null || (!type.equals("profit") && !type.equals("multiplier"))) {
             type = "profit";
@@ -88,11 +100,4 @@ public class BettingResource {
         }
     }
 
-    public static class ErrorResponse {
-        public String error;
-
-        public ErrorResponse(String error) {
-            this.error = error;
-        }
-    }
 }

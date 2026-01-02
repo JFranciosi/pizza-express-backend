@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.concurrent.ConcurrentHashMap;
 
 @ApplicationScoped
 public class LocalRedisWalletService implements WalletService {
@@ -31,10 +32,9 @@ public class LocalRedisWalletService implements WalletService {
     public boolean reserveFunds(String userId, double amount, String roundId, String transactionId) {
         if (isTransactionProcessed(transactionId)) {
             LOG.warn("Transazione " + transactionId + " già processata (Idempotency Hit)");
-            return true; // Già fatto, consideriamo successo
+            return true;
         }
 
-        // Lock utente per evitare race condition sul saldo
         synchronized (getUserLock(userId)) {
             Player player = playerRepository.findById(userId);
             if (player == null) {
@@ -130,7 +130,7 @@ public class LocalRedisWalletService implements WalletService {
         return Math.round(value * 100.0) / 100.0;
     }
 
-    private final java.util.concurrent.ConcurrentHashMap<String, Object> userLocks = new java.util.concurrent.ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
 
     private Object getUserLock(String userId) {
         return userLocks.computeIfAbsent(userId, k -> new Object());

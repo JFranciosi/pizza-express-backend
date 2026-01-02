@@ -10,12 +10,9 @@ import java.util.Set;
 public class TokenService {
 
     private final CryptoService cryptoService;
-    private final io.smallrye.jwt.auth.principal.JWTParser parser;
 
-    @jakarta.inject.Inject
-    public TokenService(CryptoService cryptoService, io.smallrye.jwt.auth.principal.JWTParser parser) {
+    public TokenService(CryptoService cryptoService) {
         this.cryptoService = cryptoService;
-        this.parser = parser;
     }
 
     public String generateAccessToken(String email, String username, String userId) {
@@ -38,18 +35,4 @@ public class TokenService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
-    public String getUserIdFromToken(String token) throws io.smallrye.jwt.auth.principal.ParseException {
-        // Remove "Bearer " prefix if present
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-        return parser.parse(token).getClaim("userId");
-    }
-
-    public String getUsernameFromToken(String token) throws io.smallrye.jwt.auth.principal.ParseException {
-        if (token != null && token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-        return parser.parse(token).getClaim("username");
-    }
 }

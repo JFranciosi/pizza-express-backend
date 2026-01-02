@@ -7,6 +7,8 @@ import com.web.model.AuthResponse;
 import com.web.model.LoginRequest;
 import com.web.model.RegisterRequest;
 import com.web.model.RefreshRequest;
+import com.web.model.ForgotPasswordRequest;
+import com.web.model.ResetPasswordRequest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -41,6 +43,8 @@ public class AuthService {
         if (playerRepository.existsByUsername(req.username())) {
             throw new BadRequestException("Username already in use");
         }
+
+        validatePassword(req.password());
 
         String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password().toCharArray());
         String id = UUID.randomUUID().toString();
@@ -114,6 +118,8 @@ public class AuthService {
             throw new BadRequestException("Incorrect old password");
         }
 
+        validatePassword(newPass);
+
         String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
@@ -156,7 +162,7 @@ public class AuthService {
         playerRepository.save(player);
     }
 
-    public void forgotPassword(com.web.model.ForgotPasswordRequest req) {
+    public void forgotPassword(ForgotPasswordRequest req) {
         Player player = playerRepository.findByEmail(req.email());
         if (player == null) {
             return;
@@ -169,7 +175,7 @@ public class AuthService {
         emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
     }
 
-    public void resetPassword(com.web.model.ResetPasswordRequest req) {
+    public void resetPassword(ResetPasswordRequest req) {
         String playerId = playerRepository.validateResetToken(req.token());
         if (playerId == null) {
             throw new BadRequestException("Invalid or expired token");
@@ -180,10 +186,30 @@ public class AuthService {
             throw new BadRequestException("User not found");
         }
 
+        validatePassword(req.newPassword());
+
         String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword().toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
 
         playerRepository.deleteResetToken(req.token());
+    }
+
+    private void validatePassword(String password) {
+        if (password == null || password.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters long");
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            throw new BadRequestException("Password must contain at least one uppercase letter");
+        }
+        if (!password.matches(".*[a-z].*")) {
+            throw new BadRequestException("Password must contain at least one lowercase letter");
+        }
+        if (!password.matches(".*\\d.*")) {
+            throw new BadRequestException("Password must contain at least one number");
+        }
+        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?].*")) {
+            throw new BadRequestException("Password must contain at least one special character");
+        }
     }
 }

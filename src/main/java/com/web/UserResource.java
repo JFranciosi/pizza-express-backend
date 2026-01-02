@@ -2,6 +2,7 @@ package com.web;
 
 import com.model.Player;
 import com.repository.PlayerRepository;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
@@ -11,7 +12,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.Base64;
 
 @Path("/users")
-@io.smallrye.common.annotation.RunOnVirtualThread
+@RunOnVirtualThread
 public class UserResource {
 
     private final PlayerRepository playerRepository;
@@ -41,16 +42,16 @@ public class UserResource {
             String base64Content = parts[1];
 
             String mimeType = "image/jpeg";
-            if (header.contains(";")) {
-                mimeType = header.split(";")[0].replace("data:", "");
+            if (header.contains(";") && header.startsWith("data:")) {
+                mimeType = header.substring(5, header.indexOf(";"));
             }
 
             byte[] imageBytes = Base64.getDecoder().decode(base64Content);
-
             return Response.ok(imageBytes).type(mimeType).build();
 
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
         }
     }
+
 }

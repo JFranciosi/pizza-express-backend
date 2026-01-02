@@ -1,11 +1,13 @@
 package com.web;
 
 import com.service.GameEngineService;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.inject.Inject;
 import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 
@@ -23,8 +25,8 @@ public class GameResource {
     @GET
     @Path("/history")
     @PermitAll
-    @io.smallrye.common.annotation.RunOnVirtualThread
-    public List<String> getFullHistory(@jakarta.ws.rs.QueryParam("limit") Integer limit) {
+    @RunOnVirtualThread
+    public List<String> getFullHistory(@QueryParam("limit") Integer limit) {
         int actualLimit = (limit != null && limit > 0) ? limit : 50;
         return gameEngine.getFullHistory(actualLimit);
     }
