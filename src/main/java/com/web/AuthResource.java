@@ -84,16 +84,17 @@ public class AuthResource {
                 return Response.status(Response.Status.BAD_REQUEST).entity("File too large (max 2MB)").build();
             }
 
-            byte[] fileBytes;
-            try (java.io.InputStream is = java.nio.file.Files.newInputStream(req.file.filePath())) {
-                fileBytes = is.readAllBytes();
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(req.file.filePath().toFile());
+            if (image == null) {
+                return Response.status(Response.Status.BAD_REQUEST).entity("Invalid image file or format").build();
             }
-            String contentType = req.file.contentType();
-            if (contentType == null)
-                contentType = "image/jpeg";
 
-            String base64Img = java.util.Base64.getEncoder().encodeToString(fileBytes);
-            String avatarUrl = "data:" + contentType + ";base64," + base64Img;
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(image, "jpg", baos);
+            byte[] sanitizedBytes = baos.toByteArray();
+
+            String base64Img = java.util.Base64.getEncoder().encodeToString(sanitizedBytes);
+            String avatarUrl = "data:image/jpeg;base64," + base64Img;
 
             authService.updateAvatar(userId, avatarUrl);
             return Response.ok(new java.util.HashMap<String, String>() {
