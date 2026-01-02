@@ -83,7 +83,7 @@ public class PlayerRepository {
                 data.get("username"),
                 data.get("email"),
                 data.get("password"),
-                Double.parseDouble(data.get("balance")));
+                parseDoubleSafe(data.get("balance")));
 
         if (data.containsKey("avatarUrl")) {
             player.setAvatarUrl(data.get("avatarUrl"));
@@ -139,6 +139,16 @@ public class PlayerRepository {
 
     public void deleteResetToken(String token) {
         keyCommands.del("reset_token:" + token);
+    }
+
+    private double parseDoubleSafe(String value) {
+        if (value == null)
+            return 0.0;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
     }
 
 }

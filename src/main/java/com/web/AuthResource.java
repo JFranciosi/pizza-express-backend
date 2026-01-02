@@ -2,8 +2,8 @@ package com.web;
 
 import com.service.AuthService;
 import com.web.model.*;
+import io.quarkus.security.Authenticated;
 import io.smallrye.common.annotation.RunOnVirtualThread;
-import io.smallrye.jwt.auth.principal.ParseException;
 import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -14,7 +14,10 @@ import jakarta.validation.Valid;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import static javax.imageio.ImageIO.read;
+import static javax.imageio.ImageIO.write;
 
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
@@ -34,32 +37,32 @@ public class AuthResource {
     }
 
     private final AuthService authService;
-    private final com.service.TokenService tokenService;
     private final String frontendUrl;
+    private final org.eclipse.microprofile.jwt.JsonWebToken jwt;
 
     @Inject
     public AuthResource(AuthService authService,
-            com.service.TokenService tokenService,
-            @ConfigProperty(name = "app.frontend.url") String frontendUrl) {
+            @ConfigProperty(name = "app.frontend.url") String frontendUrl,
+            org.eclipse.microprofile.jwt.JsonWebToken jwt) {
         this.authService = authService;
-        this.tokenService = tokenService;
         this.frontendUrl = frontendUrl;
+        this.jwt = jwt;
     }
 
     @POST
     @Path("/change-password")
-    public Response changePassword(@HeaderParam("Authorization") String token,
-            ChangePasswordRequest req) throws ParseException {
-        String userId = tokenService.getUserIdFromToken(token);
+    @Authenticated
+    public Response changePassword(ChangePasswordRequest req) {
+        String userId = jwt.getClaim("userId");
         authService.changePassword(userId, req.oldPass(), req.newPass());
         return Response.ok().build();
     }
 
     @POST
     @Path("/update-profile")
-    public Response updateProfile(@HeaderParam("Authorization") String token,
-            UpdateProfileRequest req) throws ParseException {
-        String userId = tokenService.getUserIdFromToken(token);
+    @Authenticated
+    public Response updateProfile(UpdateProfileRequest req) {
+        String userId = jwt.getClaim("userId");
         authService.updateEmail(userId, req.email(), req.password());
         return Response.ok().build();
     }
@@ -67,9 +70,9 @@ public class AuthResource {
     @POST
     @Path("/upload-avatar")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
-    public Response uploadAvatar(@HeaderParam("Authorization") String token,
-            AvatarUploadRequest req) throws ParseException, IOException {
-        String userId = tokenService.getUserIdFromToken(token);
+    @io.quarkus.security.Authenticated
+    public Response uploadAvatar(AvatarUploadRequest req) throws IOException {
+        String userId = jwt.getClaim("userId");
 
         if (req.file == null) {
             throw new BadRequestException("File is required");
@@ -79,13 +82,13 @@ public class AuthResource {
             throw new BadRequestException("File too large (max 2MB)");
         }
 
-        java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(req.file.filePath().toFile());
+        java.awt.image.BufferedImage image = read(req.file.filePath().toFile());
         if (image == null) {
             throw new BadRequestException("Invalid image file or format");
         }
 
-        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-        javax.imageio.ImageIO.write(image, "jpg", baos);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        write(image, "jpg", baos);
         byte[] sanitizedBytes = baos.toByteArray();
 
         String base64Img = java.util.Base64.getEncoder().encodeToString(sanitizedBytes);
