@@ -1,17 +1,13 @@
 package com.web;
 
 import com.service.AuthService;
-import com.web.model.LoginRequest;
-import com.web.model.RegisterRequest;
-import com.web.model.RefreshRequest;
+import com.web.model.*;
 import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @Path("/auth")
 @Produces(MediaType.APPLICATION_JSON)
@@ -32,12 +28,15 @@ public class AuthResource {
 
     private final AuthService authService;
     private final com.service.TokenService tokenService;
+    private final String frontendUrl;
 
     @Inject
     public AuthResource(AuthService authService,
-            com.service.TokenService tokenService) {
+            com.service.TokenService tokenService,
+            @ConfigProperty(name = "app.frontend.url") String frontendUrl) {
         this.authService = authService;
         this.tokenService = tokenService;
+        this.frontendUrl = frontendUrl;
     }
 
     @POST
@@ -113,21 +112,33 @@ public class AuthResource {
     @Path("/register")
     @PermitAll
     public Response register(RegisterRequest req) {
-        return Response.ok(authService.register(req)).build();
+        var authResponse = authService.register(req);
+        return createTokenResponse(authResponse);
     }
 
     @POST
     @Path("/login")
     @PermitAll
     public Response login(LoginRequest req) {
-        return Response.ok(authService.login(req)).build();
+        var authResponse = authService.login(req);
+        return createTokenResponse(authResponse);
     }
 
     @POST
     @Path("/refresh")
     @PermitAll
-    public Response refresh(RefreshRequest req) {
-        return Response.ok(authService.refresh(req)).build();
+    public Response refresh(@CookieParam("refresh_token") String cookieRefreshToken, RefreshRequest req) {
+        String tokenToUse = cookieRefreshToken;
+        if (tokenToUse == null && req != null) {
+            tokenToUse = req.refreshToken();
+        }
+
+        if (tokenToUse == null) {
+            return Response.status(Response.Status.UNAUTHORIZED).entity("No refresh token provided").build();
+        }
+
+        var authResponse = authService.refresh(new RefreshRequest(tokenToUse));
+        return createTokenResponse(authResponse);
     }
 
     @POST
@@ -146,13 +157,35 @@ public class AuthResource {
     @POST
     @Path("/reset-password")
     @PermitAll
-    public Response resetPassword(com.web.model.ResetPasswordRequest req) {
+    public Response resetPassword(ResetPasswordRequest req) {
         try {
             authService.resetPassword(req);
             return Response.ok().build();
         } catch (Exception e) {
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(new com.web.BettingResource.ErrorResponse(e.getMessage())).build();
+                    .entity(new BettingResource.ErrorResponse(e.getMessage())).build();
         }
+    }
+
+    private Response createTokenResponse(AuthResponse authResponse) {
+        boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        jakarta.ws.rs.core.NewCookie refreshCookie = new jakarta.ws.rs.core.NewCookie.Builder("refresh_token")
+                .value(authResponse.refreshToken())
+                .path("/auth/refresh")
+                .httpOnly(true)
+                .secure(isSecure)
+                .maxAge(7 * 24 * 60 * 60)
+                .build();
+
+        var scrubbedResponse = new AuthResponse(
+                authResponse.accessToken(),
+                null,
+                authResponse.userId(),
+                authResponse.username(),
+                authResponse.email(),
+                authResponse.balance(),
+                authResponse.avatarUrl());
+
+        return Response.ok(scrubbedResponse).cookie(refreshCookie).build();
     }
 }
