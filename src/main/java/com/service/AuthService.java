@@ -44,6 +44,8 @@ public class AuthService {
             throw new BadRequestException("Username already in use");
         }
 
+        validatePassword(req.password());
+
         String hashedPassword = BCrypt.withDefaults().hashToString(12, req.password().toCharArray());
         String id = UUID.randomUUID().toString();
 
@@ -116,6 +118,8 @@ public class AuthService {
             throw new BadRequestException("Incorrect old password");
         }
 
+        validatePassword(newPass);
+
         String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
@@ -182,10 +186,30 @@ public class AuthService {
             throw new BadRequestException("User not found");
         }
 
+        validatePassword(req.newPassword());
+
         String newHashed = BCrypt.withDefaults().hashToString(12, req.newPassword().toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
 
         playerRepository.deleteResetToken(req.token());
+    }
+
+    private void validatePassword(String password) {
+        if (password == null || password.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters long");
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            throw new BadRequestException("Password must contain at least one uppercase letter");
+        }
+        if (!password.matches(".*[a-z].*")) {
+            throw new BadRequestException("Password must contain at least one lowercase letter");
+        }
+        if (!password.matches(".*\\d.*")) {
+            throw new BadRequestException("Password must contain at least one number");
+        }
+        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?].*")) {
+            throw new BadRequestException("Password must contain at least one special character");
+        }
     }
 }

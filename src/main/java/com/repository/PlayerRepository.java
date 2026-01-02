@@ -107,7 +107,6 @@ public class PlayerRepository {
     }
 
     public void ensureIndices(Player player) {
-        // Idempotently ensure lookup keys exist
         valueCommands.set("player:email:" + player.getEmail(), player.getId());
         valueCommands.set("player:username:" + player.getUsername(), player.getId());
     }

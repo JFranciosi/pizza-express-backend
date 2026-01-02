@@ -8,11 +8,12 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
+import jakarta.validation.Valid;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
-
 import java.io.IOException;
 
 @Path("/auth")
@@ -101,7 +102,7 @@ public class AuthResource {
     @POST
     @Path("/register")
     @PermitAll
-    public Response register(RegisterRequest req) {
+    public Response register(@Valid RegisterRequest req) {
         var authResponse = authService.register(req);
         return createTokenResponse(authResponse);
     }
@@ -109,7 +110,7 @@ public class AuthResource {
     @POST
     @Path("/login")
     @PermitAll
-    public Response login(LoginRequest req) {
+    public Response login(@Valid LoginRequest req) {
         var authResponse = authService.login(req);
         return createTokenResponse(authResponse);
     }
@@ -155,11 +156,38 @@ public class AuthResource {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(new ErrorResponse(e.getMessage())).build();
         }
+
+    }
+
+    @POST
+    @Path("/logout")
+    @PermitAll
+    public Response logout() {
+        boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+
+        NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
+                .value("")
+                .path("/auth/refresh")
+                .httpOnly(true)
+                .secure(isSecure)
+                .maxAge(0)
+                .build();
+
+        NewCookie accessCookie = new NewCookie.Builder("access_token")
+                .value("")
+                .path("/")
+                .httpOnly(true)
+                .secure(isSecure)
+                .maxAge(0)
+                .build();
+
+        return Response.ok().cookie(refreshCookie, accessCookie).build();
     }
 
     private Response createTokenResponse(AuthResponse authResponse) {
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
-        jakarta.ws.rs.core.NewCookie refreshCookie = new jakarta.ws.rs.core.NewCookie.Builder("refresh_token")
+
+        NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value(authResponse.refreshToken())
                 .path("/auth/refresh")
                 .httpOnly(true)
@@ -167,8 +195,16 @@ public class AuthResource {
                 .maxAge(7 * 24 * 60 * 60)
                 .build();
 
+        NewCookie accessCookie = new NewCookie.Builder("access_token")
+                .value(authResponse.accessToken())
+                .path("/")
+                .httpOnly(true)
+                .secure(isSecure)
+                .maxAge(15 * 60)
+                .build();
+
         var scrubbedResponse = new AuthResponse(
-                authResponse.accessToken(),
+                null,
                 null,
                 authResponse.userId(),
                 authResponse.username(),
@@ -176,6 +212,8 @@ public class AuthResource {
                 authResponse.balance(),
                 authResponse.avatarUrl());
 
-        return Response.ok(scrubbedResponse).cookie(refreshCookie).build();
+        return Response.ok(scrubbedResponse)
+                .cookie(refreshCookie, accessCookie)
+                .build();
     }
 }
