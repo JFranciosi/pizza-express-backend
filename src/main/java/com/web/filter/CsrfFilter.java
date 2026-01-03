@@ -65,13 +65,14 @@ public class CsrfFilter implements ContainerRequestFilter, ContainerResponseFilt
 
         String token = UUID.randomUUID().toString();
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie cookie = new NewCookie.Builder(CSRF_COOKIE_NAME)
                 .value(token)
                 .path("/")
                 .httpOnly(false)
                 .secure(isSecure)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .maxAge(-1)
                 .build();
 

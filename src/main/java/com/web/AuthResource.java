@@ -199,13 +199,14 @@ public class AuthResource {
     @PermitAll
     public Response logout() {
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value("")
                 .path("/auth/refresh")
                 .httpOnly(true)
                 .secure(isSecure)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .maxAge(0)
                 .build();
 
@@ -214,7 +215,7 @@ public class AuthResource {
                 .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .maxAge(0)
                 .build();
 
@@ -223,6 +224,7 @@ public class AuthResource {
 
     private Response createTokenResponse(AuthResponse authResponse) {
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value(authResponse.refreshToken())
@@ -230,7 +232,7 @@ public class AuthResource {
                 .httpOnly(true)
                 .secure(isSecure)
                 .maxAge(7 * 24 * 60 * 60)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .build();
 
         NewCookie accessCookie = new NewCookie.Builder("access_token")
@@ -239,7 +241,7 @@ public class AuthResource {
                 .httpOnly(true)
                 .secure(isSecure)
                 .maxAge(15 * 60)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .build();
 
         var scrubbedResponse = new AuthResponse(
