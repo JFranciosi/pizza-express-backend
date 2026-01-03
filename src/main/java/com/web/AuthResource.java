@@ -234,6 +234,9 @@ public class AuthResource {
         return Response.ok().cookie(refreshCookie, accessCookie).build();
     }
 
+    public record PublicUserDto(String userId, String username, String email, Double balance, String avatarUrl) {
+    }
+
     private Response createTokenResponse(AuthResponse authResponse) {
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
         NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
@@ -256,16 +259,14 @@ public class AuthResource {
                 .sameSite(sameSite)
                 .build();
 
-        var scrubbedResponse = new AuthResponse(
-                null,
-                null,
+        var publicUser = new PublicUserDto(
                 authResponse.userId(),
                 authResponse.username(),
                 authResponse.email(),
                 authResponse.balance(),
                 authResponse.avatarUrl());
 
-        return Response.ok(scrubbedResponse)
+        return Response.ok(publicUser)
                 .cookie(refreshCookie, accessCookie)
                 .build();
     }
