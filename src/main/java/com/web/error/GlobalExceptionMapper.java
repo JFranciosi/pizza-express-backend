@@ -18,20 +18,12 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
             String message = webAppException.getMessage();
             int status = webAppException.getResponse().getStatus();
 
-            // Mask user enumeration or specific sensitive errors
             if (message != null) {
                 if (message.contains("Email already in use") || message.contains("Username already in use")) {
-                    message = "Registration failed"; // Generic message
+                    message = "Registration failed";
                     status = 400;
                 } else if (message.contains("User not found") || message.contains("Invalid credentials")) {
-                    // Let these pass or genericize further if needed?
-                    // "Invalid credentials" is already generic enough for login.
-                    // "User not found" might reveal existence, let's genericize.
                     if (status == 404 || status == 401) {
-                        // Keep as is or make generic "Invalid request"?
-                        // For now keeping simpler specific messages unless explicitly asked to mask ALL
-                        // user enumeration.
-                        // But for Register "Email in use" is the main one to mask.
                     }
                 }
             }

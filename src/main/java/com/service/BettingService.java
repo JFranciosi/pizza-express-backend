@@ -62,7 +62,6 @@ public class BettingService {
     public void placeBet(String userId, String username, double amount, double autoCashout, int index, String nonce) {
         Game game = getGameEngine().getCurrentGame();
 
-        // 1. Replay Attack Check
         if (nonce != null && !nonce.isEmpty()) {
             String nonceKey = "bet:nonce:" + nonce;
             String existing = valueCommands.get(nonceKey);
@@ -139,14 +138,6 @@ public class BettingService {
         if (bet.getCashOutMultiplier() > 0)
             throw new IllegalStateException("Hai già incassato questa scommessa!");
         if (targetMultiplier == null) {
-            long now = System.currentTimeMillis();
-            long startTime = getGameEngine().getRoundStartTime();
-            if (startTime > 0) {
-                long elapsed = now - startTime;
-                double rawMultiplier = Math.exp(0.00006 * elapsed);
-                double liveMultiplier = Math.floor(rawMultiplier * 100) / 100.0;
-                return executeCashoutLogically(userId, index, liveMultiplier);
-            }
             return executeCashoutLogically(userId, index, game.getMultiplier());
         } else {
             return executeCashoutLogically(userId, index, targetMultiplier);
