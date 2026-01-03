@@ -1,9 +1,11 @@
 package com.service;
 
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.list.ListCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import io.quarkus.runtime.Startup;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -11,58 +13,96 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.UUID;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HexFormat;
+import java.util.List;
 
 @ApplicationScoped
+@Startup
 public class ProvablyFairService {
 
     private static final Logger LOG = Logger.getLogger(ProvablyFairService.class);
-    private static final String CHAIN_KEY = "provably:chain";
-    private static final String SEED_KEY = "provably:seed";
-    private static final int CHAIN_LENGTH = 10000;
+    private static final String CHAIN_KEY = "fairness:chain"; // La lista degli hash
+    private static final String COMMITMENT_KEY = "fairness:commit"; // L'hash pubblico iniziale
+    private static final int CHAIN_LENGTH = 10000; // Adjusted to 10k as per user request
 
     private final ListCommands<String, String> listCommands;
     private final ValueCommands<String, String> valueCommands;
+    private final KeyCommands<String> keyCommands;
 
     @Inject
     public ProvablyFairService(RedisDataSource ds) {
         this.listCommands = ds.list(String.class);
         this.valueCommands = ds.value(String.class);
+        this.keyCommands = ds.key(String.class);
     }
 
-    @Startup
+    @PostConstruct
     void init() {
-        checkAndGenerateChain();
-    }
-
-    private void checkAndGenerateChain() {
-        Long size = listCommands.llen(CHAIN_KEY);
-        if (size == 0) {
-            LOG.info("Generating new Provably Fair Hash Chain of size " + CHAIN_LENGTH + "...");
-            generateChain(CHAIN_LENGTH);
-            LOG.info("Chain generation complete.");
-        } else {
-            LOG.info("Existing Hash Chain found. Size: " + size);
+        if (valueCommands.get(COMMITMENT_KEY) == null) {
+            LOG.info("Nessuna catena Provably Fair trovata (o invalidata). Generazione nuova catena sicura...");
+            generateNewChain();
         }
     }
 
-    public void generateChain(int count) {
-        String currentHash = UUID.randomUUID().toString();
-        valueCommands.set(SEED_KEY, currentHash);
-        for (int i = 0; i < count; i++) {
-            currentHash = sha256(currentHash);
-            listCommands.lpush(CHAIN_KEY, currentHash);
+    /**
+     * Genera una nuova Hash Chain usando SecureRandom e SHA-256.
+     * Questa operazione è pesante, si fa all'avvio o quando la catena finisce.
+     */
+    public void generateNewChain() {
+        keyCommands.del(CHAIN_KEY);
+
+        SecureRandom random = new SecureRandom();
+        byte[] seed = new byte[32];
+        random.nextBytes(seed);
+
+        String currentHash = HexFormat.of().formatHex(seed);
+        List<String> chain = new ArrayList<>(CHAIN_LENGTH);
+
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+
+            for (int i = 0; i < CHAIN_LENGTH; i++) {
+                byte[] hashBytes = digest.digest(currentHash.getBytes(StandardCharsets.UTF_8));
+                currentHash = HexFormat.of().formatHex(hashBytes);
+                chain.add(currentHash);
+            }
+
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 non disponibile", e);
         }
+
+        String publicCommitment = currentHash;
+        valueCommands.set(COMMITMENT_KEY, publicCommitment);
+        Collections.reverse(chain);
+        listCommands.rpush(CHAIN_KEY, chain.toArray(new String[0]));
+        LOG.info("Nuova catena Provably Fair generata. Lunghezza: " + CHAIN_LENGTH);
+        LOG.info("PUBLIC COMMITMENT: " + publicCommitment);
     }
 
-    public String popNextHash() {
+    /**
+     * Estrae il prossimo hash dalla catena per la partita corrente.
+     */
+    public String nextGameHash() {
         String hash = listCommands.lpop(CHAIN_KEY);
+
         if (hash == null) {
-            LOG.warn("Hash Chain exhausted! Regenerating...");
-            generateChain(CHAIN_LENGTH);
+            LOG.warn("Catena Provably Fair esaurita! Rigenerazione d'emergenza.");
+            generateNewChain();
             return listCommands.lpop(CHAIN_KEY);
         }
+
         return hash;
+    }
+
+    public String getCurrentCommitment() {
+        return valueCommands.get(COMMITMENT_KEY);
+    }
+
+    public long getRemainingGames() {
+        return listCommands.llen(CHAIN_KEY);
     }
 
     public double calculateCrashPoint(String hash) {
@@ -85,21 +125,9 @@ public class ProvablyFairService {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            return bytesToHex(hash);
+            return HexFormat.of().formatHex(hash);
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private static String bytesToHex(byte[] hash) {
-        StringBuilder hexString = new StringBuilder(2 * hash.length);
-        for (byte b : hash) {
-            String hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) {
-                hexString.append('0');
-            }
-            hexString.append(hex);
-        }
-        return hexString.toString();
     }
 }
