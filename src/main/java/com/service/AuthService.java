@@ -25,6 +25,8 @@ public class AuthService {
     private final EmailService emailService;
     private final String frontendUrl;
 
+    private static final String DUMMY_HASH = "$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquii.V37YoLW5I477x8p6";
+
     @Inject
     public AuthService(PlayerRepository playerRepository,
             TokenService tokenService,
@@ -67,7 +69,9 @@ public class AuthService {
 
     public AuthResponse login(LoginRequest req) {
         Player player = playerRepository.findByEmail(req.email());
+
         if (player == null) {
+            BCrypt.verifyer().verify(req.password().toCharArray(), DUMMY_HASH);
             throw new NotAuthorizedException("Invalid credentials");
         }
 
@@ -163,16 +167,15 @@ public class AuthService {
     }
 
     public void forgotPassword(ForgotPasswordRequest req) {
-        Player player = playerRepository.findByEmail(req.email());
-        if (player == null) {
-            return;
-        }
-
-        String token = UUID.randomUUID().toString();
-        playerRepository.saveResetToken(token, player.getId());
-
-        String resetLink = frontendUrl + "/reset-password?token=" + token;
-        emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+        Thread.ofVirtual().start(() -> {
+            Player player = playerRepository.findByEmail(req.email());
+            if (player != null) {
+                String token = UUID.randomUUID().toString();
+                playerRepository.saveResetToken(token, player.getId());
+                String resetLink = frontendUrl + "/reset-password?token=" + token;
+                emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+            }
+        });
     }
 
     public void resetPassword(ResetPasswordRequest req) {
