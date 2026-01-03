@@ -29,6 +29,7 @@ public class BettingResource {
         public double amount;
         public double autoCashout;
         public int index;
+        public String nonce;
     }
 
     @POST
@@ -44,7 +45,7 @@ public class BettingResource {
             }
 
             int betIndex = (req.index == 1) ? 1 : 0;
-            bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex);
+            bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex, req.nonce);
             return Response.ok().build();
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();

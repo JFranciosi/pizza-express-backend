@@ -31,6 +31,7 @@ public class BettingService {
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
     private final SortedSetCommands<String, String> zsetCommands;
     private final KeyCommands<String> keyCommands;
+    private final io.quarkus.redis.datasource.value.ValueCommands<String, String> valueCommands;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private final PlayerRepository playerRepository;
@@ -44,6 +45,7 @@ public class BettingService {
             WalletService walletService) {
         this.zsetCommands = ds.sortedSet(String.class);
         this.keyCommands = ds.key(String.class);
+        this.valueCommands = ds.value(String.class);
         this.playerRepository = playerRepository;
         this.gameEngineInstance = gameEngineInstance;
         this.walletService = walletService;
@@ -57,8 +59,20 @@ public class BettingService {
         return userId + ":" + index;
     }
 
-    public void placeBet(String userId, String username, double amount, double autoCashout, int index) {
+    public void placeBet(String userId, String username, double amount, double autoCashout, int index, String nonce) {
         Game game = getGameEngine().getCurrentGame();
+
+        // 1. Replay Attack Check
+        if (nonce != null && !nonce.isEmpty()) {
+            String nonceKey = "bet:nonce:" + nonce;
+            String existing = valueCommands.get(nonceKey);
+            if (existing != null) {
+                LOG.warn("Replay attack detected! Nonce: " + nonce + " User: " + userId);
+                throw new IllegalStateException("Duplicate bet (Replay detected).");
+            }
+            // Salva nonce per 5 minuti (tempo sufficiente per un round)
+            valueCommands.setex(nonceKey, 300, userId);
+        }
 
         if (game == null || game.getStatus() != GameState.WAITING) {
             throw new IllegalStateException(

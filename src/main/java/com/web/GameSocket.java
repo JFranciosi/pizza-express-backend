@@ -88,7 +88,7 @@ public class GameSocket {
         try {
             if (message.startsWith("BET:")) {
                 String[] parts = message.split(":");
-                if (parts.length < 4) {
+                if (parts.length < 5) {
                     connection.sendText("ERROR:Formato scommessa errato.")
                             .subscribe().with(v -> {
                             }, t -> LOG.error("Errore invio errore", t));
@@ -98,10 +98,11 @@ public class GameSocket {
                 String userId = userInfo.userId();
                 String username = userInfo.username();
 
+                String nonce = parts[1];
                 double amount = Double.parseDouble(parts[3]);
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
-                bettingService.placeBet(userId, username, amount, 0.0, index);
+                bettingService.placeBet(userId, username, amount, 0.0, index, nonce);
 
                 connection.sendText("BET_OK:" + amount)
                         .subscribe().with(v -> {
