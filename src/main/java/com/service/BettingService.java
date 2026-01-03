@@ -184,18 +184,21 @@ public class BettingService {
         String multiKey = "leaderboard:multiplier:" + today;
 
         try {
-            String compactData = String.join("|",
-                    bet.getUserId(),
-                    bet.getUsername(),
-                    String.valueOf(bet.getAmount()),
-                    String.valueOf(bet.getProfit()),
-                    String.valueOf(bet.getCashOutMultiplier()),
-                    String.valueOf(System.currentTimeMillis()));
+            Map<String, Object> data = new HashMap<>();
+            data.put("userId", bet.getUserId());
+            data.put("username", bet.getUsername());
+            data.put("betAmount", bet.getAmount());
+            data.put("profit", bet.getProfit());
+            data.put("multiplier", bet.getCashOutMultiplier());
+            data.put("timestamp", System.currentTimeMillis());
+            data.put("avatarUrl", "/users/" + bet.getUserId() + "/avatar");
 
-            zsetCommands.zadd(profitKey, bet.getProfit(), compactData);
+            String json = objectMapper.writeValueAsString(data);
+
+            zsetCommands.zadd(profitKey, bet.getProfit(), json);
             keyCommands.expire(profitKey, 172800);
 
-            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), compactData);
+            zsetCommands.zadd(multiKey, bet.getCashOutMultiplier(), json);
             keyCommands.expire(multiKey, 172800);
         } catch (Exception e) {
             LOG.error("Error saving to leaderboard", e);
