@@ -178,7 +178,12 @@ public class AuthService {
     public void forgotPassword(ForgotPasswordRequest req) {
         Thread.ofVirtual().start(() -> {
             Player player = playerRepository.findByEmail(req.email());
+
             if (player != null) {
+                if (playerRepository.isEmailRateLimited(req.email())) {
+                    return;
+                }
+
                 String token = UUID.randomUUID().toString();
                 playerRepository.saveResetToken(token, player.getId());
                 String resetLink = frontendUrl + "/reset-password?token=" + token;

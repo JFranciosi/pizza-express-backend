@@ -164,4 +164,14 @@ public class PlayerRepository {
         }
     }
 
+    public boolean isEmailRateLimited(String email) {
+        String key = "rate_limit:email:" + email;
+        String existing = valueCommands.get(key);
+        if (existing != null) {
+            return true;
+        }
+        valueCommands.setex(key, 60, "1");
+        return false;
+    }
+
 }
