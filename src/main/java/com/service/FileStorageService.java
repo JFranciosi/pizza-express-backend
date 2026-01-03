@@ -33,6 +33,16 @@ public class FileStorageService {
         return "avatars/" + filename;
     }
 
+    public String saveAvatar(String userId, Path sourcePath, String mimeType) throws IOException {
+        String extension = getExtension(mimeType);
+        String filename = userId + extension;
+        Path destinationPath = Paths.get(UPLOAD_DIR + filename);
+
+        Files.copy(sourcePath, destinationPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+        return "avatars/" + filename;
+    }
+
     public byte[] loadAvatar(String pathStr) throws IOException {
         if (pathStr.contains("..")) {
             throw new IOException("Invalid path");

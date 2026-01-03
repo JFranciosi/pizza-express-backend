@@ -85,14 +85,15 @@ public class AuthResource {
             throw new BadRequestException("File too large (max 2MB)");
         }
 
-        byte[] fileBytes = Files.readAllBytes(req.file.filePath());
-        String mimeType = detectMimeType(fileBytes);
+        // Optimization: Read only header for MIME detection
+        String mimeType = detectMimeType(req.file.filePath());
 
         if (mimeType == null) {
             throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
-        String avatarPath = fileStorageService.saveAvatar(userId, fileBytes, mimeType);
+        // Optimization: Stream copy instead of loading into memory
+        String avatarPath = fileStorageService.saveAvatar(userId, req.file.filePath(), mimeType);
 
         authService.updateAvatar(userId, avatarPath);
 
@@ -101,6 +102,17 @@ public class AuthResource {
                 put("avatarUrl", avatarPath);
             }
         }).build();
+    }
+
+    private String detectMimeType(java.nio.file.Path path) throws IOException {
+        try (var is = Files.newInputStream(path)) {
+            byte[] header = new byte[12];
+            int read = is.read(header);
+            if (read < 12)
+                return null;
+            // Delegate to existing byte implementation
+            return detectMimeType(header);
+        }
     }
 
     private String detectMimeType(byte[] data) {
