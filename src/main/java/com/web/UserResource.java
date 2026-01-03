@@ -46,8 +46,17 @@ public class UserResource {
                 mimeType = header.substring(5, header.indexOf(";"));
             }
 
+            if (!mimeType.equals("image/jpeg") && !mimeType.equals("image/png") &&
+                    !mimeType.equals("image/webp") && !mimeType.equals("image/x-icon")) {
+                mimeType = "application/octet-stream";
+            }
+
             byte[] imageBytes = Base64.getDecoder().decode(base64Content);
-            return Response.ok(imageBytes).type(mimeType).build();
+
+            return Response.ok(imageBytes)
+                    .type(mimeType)
+                    .header("X-Content-Type-Options", "nosniff")
+                    .build();
 
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
