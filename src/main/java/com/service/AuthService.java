@@ -111,6 +111,12 @@ public class AuthService {
                 player.getBalance(), player.getAvatarUrl());
     }
 
+    public void logout(String refreshToken) {
+        if (refreshToken != null) {
+            playerRepository.deleteRefreshToken(refreshToken);
+        }
+    }
+
     public void changePassword(String userId, String oldPass, String newPass) {
         Player player = playerRepository.findById(userId);
         if (player == null) {
@@ -127,6 +133,9 @@ public class AuthService {
         String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
+
+        // Invalidate all active sessions
+        playerRepository.deleteAllTokensForUser(userId);
     }
 
     public void updateEmail(String userId, String newEmail, String password) {

@@ -195,13 +195,15 @@ public class AuthResource {
     @POST
     @Path("/logout")
     @PermitAll
-    public Response logout() {
+    public Response logout(@CookieParam("refresh_token") String refreshToken) {
+        authService.logout(refreshToken);
+
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
         NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value("")
-                .path("/auth/refresh")
+                .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
                 .sameSite(sameSite)
@@ -226,7 +228,7 @@ public class AuthResource {
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value(authResponse.refreshToken())
-                .path("/auth/refresh")
+                .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
                 .maxAge(7 * 24 * 60 * 60)

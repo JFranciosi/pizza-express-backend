@@ -113,6 +113,7 @@ public class PlayerRepository {
 
     public void saveRefreshToken(String token, String playerId) {
         valueCommands.set("refresh_token:" + token, playerId, new SetArgs().ex(7200)); // 2 hours
+        sortedSetCommands.zadd("player:" + playerId + ":tokens", System.currentTimeMillis() + 7200000, token);
     }
 
     public String validateRefreshToken(String token) {
@@ -123,7 +124,19 @@ public class PlayerRepository {
     }
 
     public void deleteRefreshToken(String token) {
+        String playerId = valueCommands.get("refresh_token:" + token);
         keyCommands.del("refresh_token:" + token);
+        if (playerId != null) {
+            sortedSetCommands.zrem("player:" + playerId + ":tokens", token);
+        }
+    }
+
+    public void deleteAllTokensForUser(String userId) {
+        List<String> tokens = sortedSetCommands.zrange("player:" + userId + ":tokens", 0, -1);
+        for (String token : tokens) {
+            keyCommands.del("refresh_token:" + token);
+        }
+        keyCommands.del("player:" + userId + ":tokens");
     }
 
     public void saveResetToken(String token, String playerId) {
