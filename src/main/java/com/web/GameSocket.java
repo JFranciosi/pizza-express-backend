@@ -9,10 +9,14 @@ import io.quarkus.websockets.next.OnTextMessage;
 import io.quarkus.websockets.next.WebSocket;
 import io.quarkus.websockets.next.WebSocketConnection;
 import io.smallrye.common.annotation.RunOnVirtualThread;
+import io.smallrye.jwt.auth.principal.JWTParser;
+import io.smallrye.jwt.auth.principal.ParseException;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 import java.util.List;
 
 @WebSocket(path = "/game")
@@ -20,58 +24,94 @@ import java.util.List;
 public class GameSocket {
 
     private static final Logger LOG = Logger.getLogger(GameSocket.class);
-
     private static final Set<WebSocketConnection> sessions = ConcurrentHashMap.newKeySet();
-
+    private static final Map<String, UserInfo> connectedUsers = new ConcurrentHashMap<>();
     private final GameEngineService gameEngine;
     private final BettingService bettingService;
+    private final JWTParser jwtParser;
 
     @Inject
-    public GameSocket(GameEngineService gameEngine, BettingService bettingService) {
+    public GameSocket(GameEngineService gameEngine, BettingService bettingService, JWTParser jwtParser) {
         this.gameEngine = gameEngine;
         this.bettingService = bettingService;
+        this.jwtParser = jwtParser;
+    }
+
+    private record UserInfo(String userId, String username) {
     }
 
     @OnOpen
     public void onOpen(WebSocketConnection connection) {
-        sessions.add(connection);
-        LOG.info("Nuova connessione WebSocket: " + connection.id());
-
-        Game currentGame = gameEngine.getCurrentGame();
-        if (currentGame != null) {
-            connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
-                    .subscribe().with(v -> {
-                    }, t -> LOG.error("Errore onOpen", t));
+        String token = getAccessToken(connection);
+        if (token == null) {
+            LOG.warn("Connessione rifiutata: Token mancante (" + connection.id() + ")");
+            connection.close();
+            return;
         }
 
-        List<String> history = gameEngine.getHistory();
-        if (history != null && !history.isEmpty()) {
-            String historyMsg = "HISTORY:" + String.join(",", history);
-            connection.sendText(historyMsg)
-                    .subscribe().with(v -> {
-                    }, t -> LOG.error("Errore invio HISTORY", t));
+        try {
+            JsonWebToken jwt = jwtParser.parse(token);
+            String userId = jwt.getClaim("userId");
+            String username = jwt.getClaim("username");
+            if (username == null) {
+                username = jwt.getName();
+            }
+
+            connectedUsers.put(connection.id(), new UserInfo(userId, username));
+            sessions.add(connection);
+            LOG.info("Nuova connessione autenticata: " + username + " (" + connection.id() + ")");
+
+            Game currentGame = gameEngine.getCurrentGame();
+            if (currentGame != null) {
+                connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore onOpen", t));
+            }
+
+            List<String> history = gameEngine.getHistory();
+            if (history != null && !history.isEmpty()) {
+                String historyMsg = "HISTORY:" + String.join(",", history);
+                connection.sendText(historyMsg)
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio HISTORY", t));
+            }
+
+        } catch (ParseException e) {
+            LOG.warn("Connessione rifiutata: Token non valido (" + connection.id() + ")", e);
+            connection.close();
         }
     }
 
     @OnClose
     public void onClose(WebSocketConnection connection) {
         sessions.remove(connection);
+        connectedUsers.remove(connection.id());
         LOG.info("Connessione chiusa: " + connection.id());
     }
 
     @OnTextMessage
     public void onMessage(WebSocketConnection connection, String message) {
+        UserInfo userInfo = connectedUsers.get(connection.id());
+        if (userInfo == null) {
+            connection.sendText("ERROR:Utente non autenticato")
+                    .subscribe().with(v -> connection.close(), t -> {
+                    });
+            return;
+        }
+
         try {
             if (message.startsWith("BET:")) {
                 String[] parts = message.split(":");
                 if (parts.length < 4) {
-                    connection.sendText("ERROR:Formato scommessa errato. Usa BET:userId:username:amount[:index]")
+                    connection.sendText("ERROR:Formato scommessa errato.")
                             .subscribe().with(v -> {
                             }, t -> LOG.error("Errore invio errore", t));
                     return;
                 }
-                String userId = parts[1];
-                String username = parts[2];
+
+                String userId = userInfo.userId();
+                String username = userInfo.username();
+
                 double amount = Double.parseDouble(parts[3]);
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
@@ -84,7 +124,9 @@ public class GameSocket {
 
             } else if (message.startsWith("CASHOUT:")) {
                 String[] parts = message.split(":");
-                String userId = parts[1];
+
+                String userId = userInfo.userId();
+
                 int index = (parts.length > 2) ? Integer.parseInt(parts[2]) : 0;
 
                 bettingService.cashOut(userId, index);
@@ -107,5 +149,19 @@ public class GameSocket {
                     .subscribe().with(v -> {
                     }, t -> LOG.error("Errore invio broadcast a " + s.id(), t));
         });
+    }
+
+    private String getAccessToken(WebSocketConnection connection) {
+        String cookieHeader = connection.handshakeRequest().header("Cookie");
+        if (cookieHeader == null)
+            return null;
+
+        for (String cookie : cookieHeader.split(";")) {
+            String[] parts = cookie.trim().split("=");
+            if (parts.length == 2 && "access_token".equals(parts[0])) {
+                return parts[1];
+            }
+        }
+        return null;
     }
 }
