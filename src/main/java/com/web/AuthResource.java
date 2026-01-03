@@ -86,7 +86,7 @@ public class AuthResource {
         String mimeType = detectMimeType(fileBytes);
 
         if (mimeType == null) {
-            throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, SVG, ICO");
+            throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
         String base64Img = Base64.getEncoder().encodeToString(fileBytes);
@@ -124,11 +124,6 @@ public class AuthResource {
         if ((data[0] & 0xFF) == 0x00 && (data[1] & 0xFF) == 0x00 && (data[2] & 0xFF) == 0x01
                 && (data[3] & 0xFF) == 0x00) {
             return "image/x-icon";
-        }
-
-        String header = new String(data, 0, Math.min(data.length, 100)).trim().toLowerCase();
-        if (header.startsWith("<?xml") || header.contains("<svg")) {
-            return "image/svg+xml";
         }
 
         return null;
