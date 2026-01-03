@@ -20,7 +20,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
@@ -83,7 +82,7 @@ public class BettingService {
             }
 
             double finalAmount = round(amount);
-            String txId = UUID.randomUUID().toString();
+            String txId = "bet:" + game.getId() + ":" + userId + ":" + index;
 
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
             if (!success) {
@@ -154,7 +153,10 @@ public class BettingService {
         bet.setProfit(round(winAmount - bet.getAmount()));
         getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
-        String txId = UUID.randomUUID().toString();
+        bet.setProfit(round(winAmount - bet.getAmount()));
+        getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+
+        String txId = "win:" + bet.getGameId() + ":" + userId + ":" + index;
         boolean success = walletService.creditWinnings(userId, winAmount, getGameEngine().getCurrentGame().getId(),
                 txId);
 
@@ -255,7 +257,9 @@ public class BettingService {
 
         currentRoundBets.remove(betKey);
 
-        String txId = UUID.randomUUID().toString();
+        currentRoundBets.remove(betKey);
+
+        String txId = "refund:" + bet.getGameId() + ":" + userId + ":" + index;
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
         LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
