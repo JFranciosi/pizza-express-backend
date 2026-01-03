@@ -9,8 +9,7 @@ import io.quarkus.websockets.next.OnTextMessage;
 import io.quarkus.websockets.next.WebSocket;
 import io.quarkus.websockets.next.WebSocketConnection;
 import io.smallrye.common.annotation.RunOnVirtualThread;
-import io.smallrye.jwt.auth.principal.JWTParser;
-import io.smallrye.jwt.auth.principal.ParseException;
+import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
@@ -21,6 +20,7 @@ import java.util.List;
 
 @WebSocket(path = "/game")
 @RunOnVirtualThread
+@Authenticated
 public class GameSocket {
 
     private static final Logger LOG = Logger.getLogger(GameSocket.class);
@@ -28,13 +28,13 @@ public class GameSocket {
     private static final Map<String, UserInfo> connectedUsers = new ConcurrentHashMap<>();
     private final GameEngineService gameEngine;
     private final BettingService bettingService;
-    private final JWTParser jwtParser;
+    private final JsonWebToken jwt;
 
     @Inject
-    public GameSocket(GameEngineService gameEngine, BettingService bettingService, JWTParser jwtParser) {
+    public GameSocket(GameEngineService gameEngine, BettingService bettingService, JsonWebToken jwt) {
         this.gameEngine = gameEngine;
         this.bettingService = bettingService;
-        this.jwtParser = jwtParser;
+        this.jwt = jwt;
     }
 
     private record UserInfo(String userId, String username) {
@@ -42,43 +42,29 @@ public class GameSocket {
 
     @OnOpen
     public void onOpen(WebSocketConnection connection) {
-        String token = getAccessToken(connection);
-        if (token == null) {
-            LOG.warn("Connessione rifiutata: Token mancante (" + connection.id() + ")");
-            connection.close();
-            return;
+        String userId = jwt.getClaim("userId");
+        String username = jwt.getClaim("username");
+        if (username == null) {
+            username = jwt.getName();
         }
 
-        try {
-            JsonWebToken jwt = jwtParser.parse(token);
-            String userId = jwt.getClaim("userId");
-            String username = jwt.getClaim("username");
-            if (username == null) {
-                username = jwt.getName();
-            }
+        connectedUsers.put(connection.id(), new UserInfo(userId, username));
+        sessions.add(connection);
+        LOG.info("Nuova connessione autenticata: " + username + " (" + connection.id() + ")");
 
-            connectedUsers.put(connection.id(), new UserInfo(userId, username));
-            sessions.add(connection);
-            LOG.info("Nuova connessione autenticata: " + username + " (" + connection.id() + ")");
+        Game currentGame = gameEngine.getCurrentGame();
+        if (currentGame != null) {
+            connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore onOpen", t));
+        }
 
-            Game currentGame = gameEngine.getCurrentGame();
-            if (currentGame != null) {
-                connection.sendText("STATE:" + currentGame.getStatus() + ":" + currentGame.getMultiplier())
-                        .subscribe().with(v -> {
-                        }, t -> LOG.error("Errore onOpen", t));
-            }
-
-            List<String> history = gameEngine.getHistory();
-            if (history != null && !history.isEmpty()) {
-                String historyMsg = "HISTORY:" + String.join(",", history);
-                connection.sendText(historyMsg)
-                        .subscribe().with(v -> {
-                        }, t -> LOG.error("Errore invio HISTORY", t));
-            }
-
-        } catch (ParseException e) {
-            LOG.warn("Connessione rifiutata: Token non valido (" + connection.id() + ")", e);
-            connection.close();
+        List<String> history = gameEngine.getHistory();
+        if (history != null && !history.isEmpty()) {
+            String historyMsg = "HISTORY:" + String.join(",", history);
+            connection.sendText(historyMsg)
+                    .subscribe().with(v -> {
+                    }, t -> LOG.error("Errore invio HISTORY", t));
         }
     }
 
@@ -124,13 +110,9 @@ public class GameSocket {
 
             } else if (message.startsWith("CASHOUT:")) {
                 String[] parts = message.split(":");
-
                 String userId = userInfo.userId();
-
                 int index = (parts.length > 2) ? Integer.parseInt(parts[2]) : 0;
-
                 bettingService.cashOut(userId, index);
-
                 connection.sendText("CASHOUT_OK")
                         .subscribe().with(v -> {
                         }, t -> LOG.error("Errore invio CASHOUT_OK", t));
@@ -149,19 +131,5 @@ public class GameSocket {
                     .subscribe().with(v -> {
                     }, t -> LOG.error("Errore invio broadcast a " + s.id(), t));
         });
-    }
-
-    private String getAccessToken(WebSocketConnection connection) {
-        String cookieHeader = connection.handshakeRequest().header("Cookie");
-        if (cookieHeader == null)
-            return null;
-
-        for (String cookie : cookieHeader.split(";")) {
-            String[] parts = cookie.trim().split("=");
-            if (parts.length == 2 && "access_token".equals(parts[0])) {
-                return parts[1];
-            }
-        }
-        return null;
     }
 }
