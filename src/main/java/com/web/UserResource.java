@@ -16,10 +16,12 @@ import java.util.Base64;
 public class UserResource {
 
     private final PlayerRepository playerRepository;
+    private final com.service.FileStorageService fileStorageService;
 
     @Inject
-    public UserResource(PlayerRepository playerRepository) {
+    public UserResource(PlayerRepository playerRepository, com.service.FileStorageService fileStorageService) {
         this.playerRepository = playerRepository;
+        this.fileStorageService = fileStorageService;
     }
 
     @GET
@@ -32,32 +34,51 @@ public class UserResource {
 
         String avatarData = player.getAvatarUrl();
 
-        try {
-            String[] parts = avatarData.split(",");
-            if (parts.length < 2) {
+        if (avatarData.startsWith("data:")) {
+            try {
+                String[] parts = avatarData.split(",");
+                if (parts.length < 2) {
+                    return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
+                }
+
+                String header = parts[0];
+                String base64Content = parts[1];
+
+                String mimeType = "image/jpeg";
+                if (header.contains(";") && header.startsWith("data:")) {
+                    mimeType = header.substring(5, header.indexOf(";"));
+                }
+
+                byte[] imageBytes = Base64.getDecoder().decode(base64Content);
+                return Response.ok(imageBytes)
+                        .type(mimeType)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .build();
+            } catch (Exception e) {
                 return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
             }
+        }
 
-            String header = parts[0];
-            String base64Content = parts[1];
+        try {
+            byte[] imageBytes = fileStorageService.loadAvatar(avatarData);
+            if (imageBytes == null) {
+                return Response.status(Response.Status.NOT_FOUND).build();
+            }
 
             String mimeType = "image/jpeg";
-            if (header.contains(";") && header.startsWith("data:")) {
-                mimeType = header.substring(5, header.indexOf(";"));
-            }
-
-            if (!mimeType.equals("image/jpeg") && !mimeType.equals("image/png") &&
-                    !mimeType.equals("image/webp") && !mimeType.equals("image/x-icon")) {
-                mimeType = "application/octet-stream";
-            }
-
-            byte[] imageBytes = Base64.getDecoder().decode(base64Content);
+            if (avatarData.endsWith(".png"))
+                mimeType = "image/png";
+            else if (avatarData.endsWith(".webp"))
+                mimeType = "image/webp";
+            else if (avatarData.endsWith(".ico"))
+                mimeType = "image/x-icon";
+            else if (avatarData.endsWith(".gif"))
+                mimeType = "image/gif";
 
             return Response.ok(imageBytes)
                     .type(mimeType)
                     .header("X-Content-Type-Options", "nosniff")
                     .build();
-
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
         }

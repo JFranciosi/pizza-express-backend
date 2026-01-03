@@ -1,6 +1,7 @@
 package com.web;
 
 import com.service.AuthService;
+import com.service.FileStorageService;
 import com.web.model.*;
 import io.quarkus.security.Authenticated;
 import io.smallrye.common.annotation.RunOnVirtualThread;
@@ -16,7 +17,6 @@ import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Base64;
 import java.util.HashMap;
 
 @Path("/auth")
@@ -39,14 +39,17 @@ public class AuthResource {
     private final AuthService authService;
     private final String frontendUrl;
     private final org.eclipse.microprofile.jwt.JsonWebToken jwt;
+    private final FileStorageService fileStorageService;
 
     @Inject
     public AuthResource(AuthService authService,
             @ConfigProperty(name = "app.frontend.url") String frontendUrl,
-            org.eclipse.microprofile.jwt.JsonWebToken jwt) {
+            org.eclipse.microprofile.jwt.JsonWebToken jwt,
+            FileStorageService fileStorageService) {
         this.authService = authService;
         this.frontendUrl = frontendUrl;
         this.jwt = jwt;
+        this.fileStorageService = fileStorageService;
     }
 
     @POST
@@ -89,13 +92,13 @@ public class AuthResource {
             throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
-        String base64Img = Base64.getEncoder().encodeToString(fileBytes);
-        String avatarUrl = "data:" + mimeType + ";base64," + base64Img;
+        String avatarPath = fileStorageService.saveAvatar(userId, fileBytes, mimeType);
 
-        authService.updateAvatar(userId, avatarUrl);
+        authService.updateAvatar(userId, avatarPath);
+
         return Response.ok(new HashMap<String, String>() {
             {
-                put("avatarUrl", avatarUrl);
+                put("avatarUrl", avatarPath);
             }
         }).build();
     }
