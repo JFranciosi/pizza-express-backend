@@ -207,8 +207,6 @@ public class BettingService {
                     if (parts.length >= 6) {
                         result = new HashMap<>();
                         result.put("id", parts[0] + "_" + parts[5]);
-                        // Internal ID removed for privacy
-                        // result.put("userId", parts[0]);
                         result.put("username", parts[1]);
                         result.put("betAmount", Double.parseDouble(parts[2]));
                         result.put("profit", Double.parseDouble(parts[3]));
