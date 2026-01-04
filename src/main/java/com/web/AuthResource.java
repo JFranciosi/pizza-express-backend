@@ -85,14 +85,12 @@ public class AuthResource {
             throw new BadRequestException("File too large (max 2MB)");
         }
 
-        // Optimization: Read only header for MIME detection
         String mimeType = detectMimeType(req.file.filePath());
 
         if (mimeType == null) {
             throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
-        // Optimization: Stream copy instead of loading into memory
         String avatarPath = fileStorageService.saveAvatar(userId, req.file.filePath(), mimeType);
 
         authService.updateAvatar(userId, avatarPath);
@@ -110,7 +108,6 @@ public class AuthResource {
             int read = is.read(header);
             if (read < 12)
                 return null;
-            // Delegate to existing byte implementation
             return detectMimeType(header);
         }
     }
@@ -269,5 +266,23 @@ public class AuthResource {
         return Response.ok(publicUser)
                 .cookie(refreshCookie, accessCookie)
                 .build();
+    }
+
+    @GET
+    @Path("/me")
+    @Authenticated
+    public Response me() {
+        String userId = jwt.getClaim("userId");
+        var user = authService.findById(userId);
+        if (user == null) {
+            return Response.status(Response.Status.UNAUTHORIZED).build();
+        }
+
+        return Response.ok(new PublicUserDto(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getBalance(),
+                user.getAvatarUrl())).build();
     }
 }

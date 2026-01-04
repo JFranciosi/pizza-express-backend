@@ -231,4 +231,8 @@ public class AuthService {
             throw new BadRequestException("Password must contain at least one special character");
         }
     }
+
+    public Player findById(String id) {
+        return playerRepository.findById(id);
+    }
 }
