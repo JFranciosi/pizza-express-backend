@@ -15,6 +15,8 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotAuthorizedException;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import com.web.error.AuthenticationFailedException;
+import com.web.error.UserAlreadyExistsException;
 import java.util.UUID;
 
 @ApplicationScoped
@@ -40,10 +42,10 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email())) {
-            throw new BadRequestException("Email already in use");
+            throw new UserAlreadyExistsException("Email already in use");
         }
         if (playerRepository.existsByUsername(req.username())) {
-            throw new BadRequestException("Username already in use");
+            throw new UserAlreadyExistsException("Username already in use");
         }
 
         validatePassword(req.password());
@@ -72,12 +74,12 @@ public class AuthService {
 
         if (player == null) {
             BCrypt.verifyer().verify(req.password().toCharArray(), DUMMY_HASH);
-            throw new NotAuthorizedException("Invalid credentials");
+            throw new AuthenticationFailedException("Invalid credentials");
         }
 
         BCrypt.Result result = BCrypt.verifyer().verify(req.password().toCharArray(), player.getPasswordHash());
         if (!result.verified) {
-            throw new NotAuthorizedException("Invalid credentials");
+            throw new AuthenticationFailedException("Invalid credentials");
         }
 
         playerRepository.ensureIndices(player);
@@ -157,7 +159,7 @@ public class AuthService {
         }
 
         if (playerRepository.existsByEmail(newEmail)) {
-            throw new BadRequestException("Email already in use");
+            throw new UserAlreadyExistsException("Email already in use");
         }
 
         playerRepository.removeLookups(player.getEmail(), null);
