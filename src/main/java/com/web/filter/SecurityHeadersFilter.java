@@ -35,18 +35,8 @@ public class SecurityHeadersFilter implements ContainerResponseFilter {
         responseContext.getHeaders().add("Referrer-Policy", "strict-origin-when-cross-origin");
         responseContext.getHeaders().add("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
 
-        if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Origin")) {
-            if (origin != null && (origin.equals("https://pizzaexpressdemo.netlify.app")
-                    || origin.startsWith("http://localhost"))) {
-                responseContext.getHeaders().add("Access-Control-Allow-Origin", origin);
-                responseContext.getHeaders().add("Access-Control-Allow-Credentials", "true");
-
-                if (!responseContext.getHeaders().containsKey("Access-Control-Expose-Headers")) {
-                    responseContext.getHeaders().add("Access-Control-Expose-Headers",
-                            "x-xsrf-token, X-XSRF-TOKEN, x-csrf-token, X-CSRF-TOKEN");
-                }
-            }
-        }
+        // Manual CORS patch removed to avoid "multiple values" error.
+        // Quarkus CORS filter in application.properties should handle it.
 
         if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
             if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Headers")) {
