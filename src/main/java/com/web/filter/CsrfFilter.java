@@ -36,7 +36,8 @@ public class CsrfFilter implements ContainerRequestFilter, ContainerResponseFilt
 
         String path = requestContext.getUriInfo().getPath();
         if (path.contains("/auth/login") || path.contains("/auth/register") ||
-                path.contains("/auth/forgot-password") || path.contains("/auth/reset-password")) {
+                path.contains("/auth/forgot-password") || path.contains("/auth/reset-password") ||
+                path.contains("/auth/logout")) {
             return;
         }
 
