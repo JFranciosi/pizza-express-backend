@@ -34,10 +34,6 @@ public class CsrfFilter implements ContainerRequestFilter, ContainerResponseFilt
             return;
         }
 
-        if (securityIdentity.isAnonymous()) {
-            return;
-        }
-
         String csrfHeader = requestContext.getHeaderString(CSRF_HEADER_NAME);
         Cookie csrfCookie = requestContext.getCookies().get(CSRF_COOKIE_NAME);
 
@@ -51,9 +47,6 @@ public class CsrfFilter implements ContainerRequestFilter, ContainerResponseFilt
     @Override
     public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext)
             throws IOException {
-        if (securityIdentity.isAnonymous()) {
-            return;
-        }
 
         if (requestContext.getCookies().containsKey(CSRF_COOKIE_NAME)) {
             return;

@@ -269,6 +269,13 @@ public class AuthResource {
     }
 
     @GET
+    @Path("/csrf")
+    @PermitAll
+    public Response getCsrfHandshake() {
+        return Response.ok().build();
+    }
+
+    @GET
     @Path("/me")
     @Authenticated
     public Response me() {
