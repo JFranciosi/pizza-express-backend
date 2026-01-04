@@ -48,7 +48,9 @@ public class CsrfFilter implements ContainerRequestFilter, ContainerResponseFilt
     public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext)
             throws IOException {
 
-        if (requestContext.getCookies().containsKey(CSRF_COOKIE_NAME)) {
+        boolean isHandshake = requestContext.getUriInfo().getPath().endsWith("/auth/csrf");
+
+        if (!isHandshake && requestContext.getCookies().containsKey(CSRF_COOKIE_NAME)) {
             return;
         }
 
