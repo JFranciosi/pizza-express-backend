@@ -17,10 +17,10 @@ import org.jboss.logging.Logger;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
 
@@ -29,6 +29,7 @@ public class BettingService {
 
     private static final Logger LOG = Logger.getLogger(BettingService.class);
     private final Map<String, Bet> currentRoundBets = new ConcurrentHashMap<>();
+    private final ConcurrentSkipListMap<Double, List<String>> autoCashoutMap = new ConcurrentSkipListMap<>();
     private final SortedSetCommands<String, String> zsetCommands;
     private final KeyCommands<String> keyCommands;
     private final io.quarkus.redis.datasource.value.ValueCommands<String, String> valueCommands;
@@ -69,29 +70,21 @@ public class BettingService {
                 LOG.warn("Replay attack detected! Nonce: " + nonce + " User: " + userId);
                 throw new IllegalStateException("Duplicate bet (Replay detected).");
             }
-            // Salva nonce per 5 minuti (tempo sufficiente per un round)
             valueCommands.setex(nonceKey, 300, userId);
         }
 
         if (game == null || game.getStatus() != GameState.WAITING) {
-            throw new IllegalStateException(
-                    "Non puoi scommettere ora. Il gioco è " + (game != null ? game.getStatus() : "null"));
+            throw new IllegalStateException("Non puoi scommettere ora.");
         }
-        if (amount < 0.10) {
-            throw new IllegalArgumentException("L'importo minimo è 0.10€");
-        }
-        if (amount > 100) {
-            throw new IllegalArgumentException("L'importo massimo è 100€");
-        }
-        if (index < 0 || index > 1) {
-            throw new IllegalArgumentException("Index scommessa non valido (0-1)");
+        if (amount < 0.10 || amount > 100) {
+            throw new IllegalArgumentException("Importo non valido (0.10 - 100€)");
         }
 
         String betKey = getBetKey(userId, index);
 
         currentRoundBets.compute(betKey, (key, existingBet) -> {
             if (existingBet != null) {
-                throw new IllegalStateException("Hai già piazzato questa scommessa (" + index + ")");
+                throw new IllegalStateException("Scommessa già presente.");
             }
 
             double finalAmount = round(amount);
@@ -99,8 +92,9 @@ public class BettingService {
 
             boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
             if (!success) {
-                throw new IllegalStateException("Saldo insufficiente o errore transazione");
+                throw new IllegalStateException("Saldo insufficiente.");
             }
+
             Player player = playerRepository.findById(userId);
             String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
 
@@ -109,10 +103,16 @@ public class BettingService {
             return bet;
         });
 
-        String avatarUrl = currentRoundBets.get(betKey).getAvatarUrl();
-        String avatarApiUrl = (avatarUrl != null && !avatarUrl.isEmpty()) ? "/users/" + userId + "/avatar" : "";
+        if (autoCashout > 1.00) {
+            autoCashoutMap.computeIfAbsent(autoCashout, k -> new CopyOnWriteArrayList<>()).add(betKey);
+        }
 
-        LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€");
+        Bet bet = currentRoundBets.get(betKey);
+        String avatarApiUrl = (bet.getAvatarUrl() != null && !bet.getAvatarUrl().isEmpty())
+                ? "/users/" + userId + "/avatar"
+                : "";
+
+        LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€ (Auto: " + autoCashout + "x)");
         getGameEngine().broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
@@ -122,30 +122,14 @@ public class BettingService {
 
     public CashOutResult cashOut(String userId, int index, Double targetMultiplier) {
         Game game = getGameEngine().getCurrentGame();
-        if (game == null) {
-            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
+        if (game == null || (game.getStatus() != GameState.FLYING && targetMultiplier == null)) {
+            throw new IllegalStateException("Gioco non attivo.");
         }
-
-        if (game.getStatus() != GameState.FLYING && targetMultiplier == null) {
-            throw new IllegalStateException("Impossibile fare cashout. Gioco non attivo.");
-        }
-
-        String betKey = getBetKey(userId, index);
-        Bet bet = currentRoundBets.get(betKey);
-
-        if (bet == null)
-            throw new IllegalStateException("Nessuna scommessa attiva trovata (Index " + index + ")");
-        if (bet.getCashOutMultiplier() > 0)
-            throw new IllegalStateException("Hai già incassato questa scommessa!");
-        if (targetMultiplier == null) {
-            return executeCashoutLogically(userId, index, game.getMultiplier());
-        } else {
-            return executeCashoutLogically(userId, index, targetMultiplier);
-        }
+        return executeCashoutLogically(userId, index,
+                targetMultiplier != null ? targetMultiplier : game.getMultiplier());
     }
 
     private synchronized CashOutResult executeCashoutLogically(String userId, int index, double multiplier) {
-
         String betKey = getBetKey(userId, index);
         Bet bet = currentRoundBets.get(betKey);
 
@@ -156,9 +140,13 @@ public class BettingService {
 
         bet.setCashOutMultiplier(multiplier);
         bet.setProfit(round(winAmount - bet.getAmount()));
-        getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
+        if (bet.getAutoCashout() > 1.0) {
+            List<String> keys = autoCashoutMap.get(bet.getAutoCashout());
+            if (keys != null) {
+                keys.remove(betKey);
+            }
+        }
 
-        bet.setProfit(round(winAmount - bet.getAmount()));
         getGameEngine().broadcast("CASHOUT:" + userId + ":" + multiplier + ":" + winAmount + ":" + index);
 
         String txId = "win:" + bet.getGameId() + ":" + userId + ":" + index;
@@ -166,14 +154,14 @@ public class BettingService {
                 txId);
 
         if (!success) {
-            LOG.error("CRITICAL: Failed to credit winnings for user " + userId);
+            LOG.error("CRITICAL: Errore accredito vincita manuale " + userId);
         }
 
         double newBalance = walletService.getBalance(userId);
+        saveToLeaderboard(bet);
 
         LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + multiplier
                 + "x). Nuovo saldo: " + newBalance);
-        saveToLeaderboard(bet);
 
         return new CashOutResult(winAmount, newBalance, multiplier);
     }
@@ -237,46 +225,63 @@ public class BettingService {
     }
 
     public void checkAutoCashouts(double currentMultiplier) {
-        currentRoundBets.values().forEach(bet -> {
-            if (bet.getCashOutMultiplier() == 0 && bet.getAutoCashout() > 1.00
-                    && currentMultiplier >= bet.getAutoCashout()) {
-                try {
-                    cashOut(bet.getUserId(), bet.getIndex(), bet.getAutoCashout());
-                    LOG.info("AUTO-CASHOUT per " + bet.getUsername() + " [" + bet.getIndex() + "] a "
-                            + bet.getAutoCashout() + "x (preciso)");
-                } catch (Exception e) {
-                    LOG.error("Errore autocashout " + bet.getUsername(), e);
+        var eligibleMap = autoCashoutMap.headMap(currentMultiplier, true);
+
+        if (eligibleMap.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<Double, List<String>> entry : eligibleMap.entrySet()) {
+            double targetMultiplier = entry.getKey();
+            List<String> betKeys = entry.getValue();
+
+            for (String betKey : betKeys) {
+                Bet bet = currentRoundBets.get(betKey);
+                if (bet != null && bet.getCashOutMultiplier() == 0) {
+                    try {
+                        cashOut(bet.getUserId(), bet.getIndex(), targetMultiplier);
+                        LOG.info("AUTO-CASHOUT RAPIDO: " + bet.getUsername() + " a " + targetMultiplier + "x");
+                    } catch (Exception e) {
+                        LOG.error("Errore autocashout ottimizzato " + betKey, e);
+                    }
                 }
             }
-        });
+        }
+        eligibleMap.clear();
     }
 
     public void cancelBet(String userId, int index) {
         Game game = getGameEngine().getCurrentGame();
         if (game == null || game.getStatus() != GameState.WAITING) {
-            throw new IllegalStateException("Non puoi cancellare la scommessa ora.");
+            throw new IllegalStateException("Troppo tardi.");
         }
 
         String betKey = getBetKey(userId, index);
-        Bet bet = currentRoundBets.get(betKey);
+        Bet bet = currentRoundBets.remove(betKey);
 
         if (bet == null)
-            throw new IllegalStateException("Nessuna scommessa da cancellare (Index " + index + ")");
+            throw new IllegalStateException("Nessuna scommessa.");
 
-        currentRoundBets.remove(betKey);
-
-        currentRoundBets.remove(betKey);
+        if (bet.getAutoCashout() > 1.0) {
+            List<String> keys = autoCashoutMap.get(bet.getAutoCashout());
+            if (keys != null) {
+                keys.remove(betKey);
+                if (keys.isEmpty()) {
+                    autoCashoutMap.remove(bet.getAutoCashout());
+                }
+            }
+        }
 
         String txId = "refund:" + bet.getGameId() + ":" + userId + ":" + index;
         walletService.refundBet(userId, bet.getAmount(), game.getId(), txId);
 
-        LOG.info("Scommessa cancellata " + userId + " [" + index + "]. Rimborso: " + bet.getAmount());
         getGameEngine().broadcast("CANCEL_BET:" + userId + ":" + index);
     }
 
     public List<Bet> resetBetsForNewRound() {
-        List<Bet> oldBets = currentRoundBets.values().stream().collect(Collectors.toList());
+        List<Bet> oldBets = new ArrayList<>(currentRoundBets.values());
         currentRoundBets.clear();
+        autoCashoutMap.clear();
         return oldBets;
     }
 
