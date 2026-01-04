@@ -6,12 +6,20 @@ import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.ext.Provider;
 import java.io.IOException;
 
+import org.jboss.logging.Logger;
+
 @Provider
 public class SecurityHeadersFilter implements ContainerResponseFilter {
+
+    private static final Logger LOG = Logger.getLogger(SecurityHeadersFilter.class);
 
     @Override
     public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext)
             throws IOException {
+        String origin = requestContext.getHeaderString("Origin");
+        LOG.info("SecurityHeadersFilter executing. Origin: " + origin + ", Path: "
+                + requestContext.getUriInfo().getPath());
+
         responseContext.getHeaders().add("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         String csp = "default-src 'self'; " +
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
@@ -27,8 +35,20 @@ public class SecurityHeadersFilter implements ContainerResponseFilter {
         responseContext.getHeaders().add("Referrer-Policy", "strict-origin-when-cross-origin");
         responseContext.getHeaders().add("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
 
+        if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Origin")) {
+            if (origin != null && (origin.equals("https://pizzaexpressdemo.netlify.app")
+                    || origin.startsWith("http://localhost"))) {
+                responseContext.getHeaders().add("Access-Control-Allow-Origin", origin);
+                responseContext.getHeaders().add("Access-Control-Allow-Credentials", "true");
+
+                if (!responseContext.getHeaders().containsKey("Access-Control-Expose-Headers")) {
+                    responseContext.getHeaders().add("Access-Control-Expose-Headers",
+                            "x-xsrf-token, X-XSRF-TOKEN, x-csrf-token, X-CSRF-TOKEN");
+                }
+            }
+        }
+
         if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
-            String origin = requestContext.getHeaderString("Origin");
             if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Headers")) {
                 responseContext.getHeaders().add("Access-Control-Allow-Headers",
                         "accept, authorization, content-type, x-requested-with, x-xsrf-token, X-XSRF-TOKEN, x-csrf-token, X-CSRF-TOKEN");
