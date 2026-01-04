@@ -112,8 +112,7 @@ public class GameEngineService {
             bettingService.resetBetsForNewRound();
             saveGameToRedis();
 
-            LOG.info("Nuovo round creato: " + currentGame.getId()
-                    + " - Crash: " + crashPoint + " (Seed: " + gameSeed + ")");
+            LOG.info("Nuovo round creato: " + currentGame.getId() + " - Hash: " + currentGame.getHash());
 
             gameSocket.broadcast("STATE:WAITING");
             gameSocket.broadcast("TIMER:" + (WAITING_TIME_MS / 1000));
