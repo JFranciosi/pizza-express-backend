@@ -201,23 +201,30 @@ public class BettingService {
 
         return list.stream().map(dataString -> {
             try {
-                Map<String, Object> map = new HashMap<>();
+                Map<String, Object> result = null;
                 if (dataString.contains("|")) {
                     String[] parts = dataString.split("\\|");
                     if (parts.length >= 6) {
-                        map.put("id", parts[0] + "_" + parts[5]);
-                        map.put("userId", parts[0]);
-                        map.put("username", parts[1]);
-                        map.put("betAmount", Double.parseDouble(parts[2]));
-                        map.put("profit", Double.parseDouble(parts[3]));
-                        map.put("multiplier", Double.parseDouble(parts[4]));
-                        map.put("timestamp", Long.parseLong(parts[5]));
-                        map.put("avatarUrl", "/users/" + parts[0] + "/avatar");
-                        return map;
+                        result = new HashMap<>();
+                        result.put("id", parts[0] + "_" + parts[5]);
+                        // Internal ID removed for privacy
+                        // result.put("userId", parts[0]);
+                        result.put("username", parts[1]);
+                        result.put("betAmount", Double.parseDouble(parts[2]));
+                        result.put("profit", Double.parseDouble(parts[3]));
+                        result.put("multiplier", Double.parseDouble(parts[4]));
+                        result.put("timestamp", Long.parseLong(parts[5]));
+                        result.put("avatarUrl", "/users/" + parts[0] + "/avatar");
                     }
+                } else {
+                    result = objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
+                    });
                 }
-                return objectMapper.readValue(dataString, new TypeReference<Map<String, Object>>() {
-                });
+
+                if (result != null) {
+                    result.remove("userId");
+                }
+                return result;
             } catch (Exception e) {
                 return null;
             }
