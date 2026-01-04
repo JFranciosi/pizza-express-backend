@@ -29,6 +29,9 @@ public class RateLimitFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
+        if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
+
+        }
         String ip = (request.remoteAddress() != null) ? request.remoteAddress().host() : null;
         
         if (ip == null || ip.isEmpty()) {
