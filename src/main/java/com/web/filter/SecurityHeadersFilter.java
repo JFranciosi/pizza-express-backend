@@ -26,5 +26,19 @@ public class SecurityHeadersFilter implements ContainerResponseFilter {
         responseContext.getHeaders().add("X-Content-Type-Options", "nosniff");
         responseContext.getHeaders().add("Referrer-Policy", "strict-origin-when-cross-origin");
         responseContext.getHeaders().add("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+
+        if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
+            String origin = requestContext.getHeaderString("Origin");
+            if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Headers")) {
+                responseContext.getHeaders().add("Access-Control-Allow-Headers",
+                        "accept, authorization, content-type, x-requested-with, x-xsrf-token, X-XSRF-TOKEN, x-csrf-token, X-CSRF-TOKEN");
+            }
+            if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Methods")) {
+                responseContext.getHeaders().add("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS");
+            }
+            if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Credentials")) {
+                responseContext.getHeaders().add("Access-Control-Allow-Credentials", "true");
+            }
+        }
     }
 }
