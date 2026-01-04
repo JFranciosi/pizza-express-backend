@@ -111,9 +111,7 @@ public class BettingService {
         String avatarApiUrl = (bet.getAvatarUrl() != null && !bet.getAvatarUrl().isEmpty())
                 ? "/users/" + userId + "/avatar"
                 : "";
-
-        LOG.info("Scommessa piazzata: " + username + " [" + index + "] - " + amount + "€ (Auto: " + autoCashout + "x)");
-        getGameEngine().broadcast("BET:" + userId + ":" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
+        getGameEngine().broadcast("BET:" + username + ":" + amount + ":" + index + ":" + avatarApiUrl);
     }
 
     public CashOutResult cashOut(String userId, int index) {
@@ -159,9 +157,6 @@ public class BettingService {
 
         double newBalance = walletService.getBalance(userId);
         saveToLeaderboard(bet);
-
-        LOG.info("CASHOUT " + userId + " [" + index + "] vince " + winAmount + "€ (" + multiplier
-                + "x). Nuovo saldo: " + newBalance);
 
         return new CashOutResult(winAmount, newBalance, multiplier);
     }
@@ -245,7 +240,6 @@ public class BettingService {
                 if (bet != null && bet.getCashOutMultiplier() == 0) {
                     try {
                         cashOut(bet.getUserId(), bet.getIndex(), targetMultiplier);
-                        LOG.info("AUTO-CASHOUT RAPIDO: " + bet.getUsername() + " a " + targetMultiplier + "x");
                     } catch (Exception e) {
                         LOG.error("Errore autocashout ottimizzato " + betKey, e);
                     }
