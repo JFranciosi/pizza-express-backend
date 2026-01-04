@@ -91,13 +91,15 @@ public class AuthResource {
             throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
-        String avatarPath = fileStorageService.saveAvatar(userId, req.file.filePath(), mimeType);
+        String internalPath = fileStorageService.saveAvatar(userId, req.file.filePath(), mimeType);
 
-        authService.updateAvatar(userId, avatarPath);
+        authService.updateAvatar(userId, internalPath);
+
+        String apiUrlPath = "/users/" + userId + "/avatar";
 
         return Response.ok(new HashMap<String, String>() {
             {
-                put("avatarUrl", avatarPath);
+                put("avatarUrl", apiUrlPath);
             }
         }).build();
     }
@@ -256,12 +258,18 @@ public class AuthResource {
                 .sameSite(sameSite)
                 .build();
 
+        String avatarUrl = authResponse.avatarUrl();
+        if (avatarUrl != null && !avatarUrl.startsWith("http") && !avatarUrl.startsWith("data:")) {
+            // It's a local file path, convert to API endpoint
+            avatarUrl = "/users/" + authResponse.userId() + "/avatar";
+        }
+
         var publicUser = new PublicUserDto(
                 authResponse.userId(),
                 authResponse.username(),
                 authResponse.email(),
                 authResponse.balance(),
-                authResponse.avatarUrl());
+                avatarUrl);
 
         return Response.ok(publicUser)
                 .cookie(refreshCookie, accessCookie)
@@ -285,11 +293,16 @@ public class AuthResource {
             return Response.status(Response.Status.UNAUTHORIZED).build();
         }
 
+        String avatarUrl = user.getAvatarUrl();
+        if (avatarUrl != null && !avatarUrl.startsWith("http") && !avatarUrl.startsWith("data:")) {
+            avatarUrl = "/users/" + user.getId() + "/avatar";
+        }
+
         return Response.ok(new PublicUserDto(
                 user.getId(),
                 user.getUsername(),
                 user.getEmail(),
                 user.getBalance(),
-                user.getAvatarUrl())).build();
+                avatarUrl)).build();
     }
 }
