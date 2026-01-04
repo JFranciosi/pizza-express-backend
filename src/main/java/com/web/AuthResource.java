@@ -1,6 +1,7 @@
 package com.web;
 
 import com.service.AuthService;
+import com.service.FileStorageService;
 import com.web.model.*;
 import io.quarkus.security.Authenticated;
 import io.smallrye.common.annotation.RunOnVirtualThread;
@@ -16,7 +17,6 @@ import org.jboss.resteasy.reactive.RestForm;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Base64;
 import java.util.HashMap;
 
 @Path("/auth")
@@ -39,14 +39,17 @@ public class AuthResource {
     private final AuthService authService;
     private final String frontendUrl;
     private final org.eclipse.microprofile.jwt.JsonWebToken jwt;
+    private final FileStorageService fileStorageService;
 
     @Inject
     public AuthResource(AuthService authService,
             @ConfigProperty(name = "app.frontend.url") String frontendUrl,
-            org.eclipse.microprofile.jwt.JsonWebToken jwt) {
+            org.eclipse.microprofile.jwt.JsonWebToken jwt,
+            FileStorageService fileStorageService) {
         this.authService = authService;
         this.frontendUrl = frontendUrl;
         this.jwt = jwt;
+        this.fileStorageService = fileStorageService;
     }
 
     @POST
@@ -82,22 +85,31 @@ public class AuthResource {
             throw new BadRequestException("File too large (max 2MB)");
         }
 
-        byte[] fileBytes = Files.readAllBytes(req.file.filePath());
-        String mimeType = detectMimeType(fileBytes);
+        String mimeType = detectMimeType(req.file.filePath());
 
         if (mimeType == null) {
-            throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, SVG, ICO");
+            throw new BadRequestException("Unsupported file format. Allowed: JPEG, PNG, WEBP, ICO");
         }
 
-        String base64Img = Base64.getEncoder().encodeToString(fileBytes);
-        String avatarUrl = "data:" + mimeType + ";base64," + base64Img;
+        String avatarPath = fileStorageService.saveAvatar(userId, req.file.filePath(), mimeType);
 
-        authService.updateAvatar(userId, avatarUrl);
+        authService.updateAvatar(userId, avatarPath);
+
         return Response.ok(new HashMap<String, String>() {
             {
-                put("avatarUrl", avatarUrl);
+                put("avatarUrl", avatarPath);
             }
         }).build();
+    }
+
+    private String detectMimeType(java.nio.file.Path path) throws IOException {
+        try (var is = Files.newInputStream(path)) {
+            byte[] header = new byte[12];
+            int read = is.read(header);
+            if (read < 12)
+                return null;
+            return detectMimeType(header);
+        }
     }
 
     private String detectMimeType(byte[] data) {
@@ -124,11 +136,6 @@ public class AuthResource {
         if ((data[0] & 0xFF) == 0x00 && (data[1] & 0xFF) == 0x00 && (data[2] & 0xFF) == 0x01
                 && (data[3] & 0xFF) == 0x00) {
             return "image/x-icon";
-        }
-
-        String header = new String(data, 0, Math.min(data.length, 100)).trim().toLowerCase();
-        if (header.startsWith("<?xml") || header.contains("<svg")) {
-            return "image/svg+xml";
         }
 
         return null;
@@ -197,15 +204,18 @@ public class AuthResource {
     @POST
     @Path("/logout")
     @PermitAll
-    public Response logout() {
+    public Response logout(@CookieParam("refresh_token") String refreshToken) {
+        authService.logout(refreshToken);
+
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value("")
-                .path("/auth/refresh")
+                .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .maxAge(0)
                 .build();
 
@@ -214,23 +224,27 @@ public class AuthResource {
                 .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .maxAge(0)
                 .build();
 
         return Response.ok().cookie(refreshCookie, accessCookie).build();
     }
 
+    public record PublicUserDto(String userId, String username, String email, Double balance, String avatarUrl) {
+    }
+
     private Response createTokenResponse(AuthResponse authResponse) {
         boolean isSecure = frontendUrl != null && frontendUrl.startsWith("https");
+        NewCookie.SameSite sameSite = isSecure ? NewCookie.SameSite.NONE : NewCookie.SameSite.LAX;
 
         NewCookie refreshCookie = new NewCookie.Builder("refresh_token")
                 .value(authResponse.refreshToken())
-                .path("/auth/refresh")
+                .path("/")
                 .httpOnly(true)
                 .secure(isSecure)
                 .maxAge(7 * 24 * 60 * 60)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .build();
 
         NewCookie accessCookie = new NewCookie.Builder("access_token")
@@ -239,20 +253,36 @@ public class AuthResource {
                 .httpOnly(true)
                 .secure(isSecure)
                 .maxAge(15 * 60)
-                .sameSite(NewCookie.SameSite.NONE)
+                .sameSite(sameSite)
                 .build();
 
-        var scrubbedResponse = new AuthResponse(
-                null,
-                null,
+        var publicUser = new PublicUserDto(
                 authResponse.userId(),
                 authResponse.username(),
                 authResponse.email(),
                 authResponse.balance(),
                 authResponse.avatarUrl());
 
-        return Response.ok(scrubbedResponse)
+        return Response.ok(publicUser)
                 .cookie(refreshCookie, accessCookie)
                 .build();
+    }
+
+    @GET
+    @Path("/me")
+    @Authenticated
+    public Response me() {
+        String userId = jwt.getClaim("userId");
+        var user = authService.findById(userId);
+        if (user == null) {
+            return Response.status(Response.Status.UNAUTHORIZED).build();
+        }
+
+        return Response.ok(new PublicUserDto(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getBalance(),
+                user.getAvatarUrl())).build();
     }
 }

@@ -96,7 +96,7 @@ public class GameEngineService {
         startingNewRound = true;
 
         try {
-            String gameSeed = provablyFairService.popNextHash();
+            String gameSeed = provablyFairService.nextGameHash();
             currentGame = new Game();
             currentGame.setId(UUID.randomUUID().toString());
             currentGame.setStatus(GameState.WAITING);
@@ -105,9 +105,8 @@ public class GameEngineService {
             double crashPoint = provablyFairService.calculateCrashPoint(gameSeed);
 
             currentGame.setCrashPoint(crashPoint);
-            currentGame.setSecret(gameSeed);
-            currentGame.setHash(provablyFairService.sha256(gameSeed));
-
+            currentGame.setSecret(gameSeed); // The seed for THIS game is the hash from the chain
+            currentGame.setHash(provablyFairService.sha256(gameSeed)); // Hash of the seed for verification (if needed)
             currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
 
             bettingService.resetBetsForNewRound();

@@ -48,3 +48,6 @@ nb-configuration.xml
 privateKey.pem
 # Ignore other keys but allow publicKey if explicitly tracked
 *.key
+
+# Uploads
+uploads/

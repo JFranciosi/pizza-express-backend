@@ -15,7 +15,10 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotAuthorizedException;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import com.web.error.AuthenticationFailedException;
+import com.web.error.UserAlreadyExistsException;
 import java.util.UUID;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class AuthService {
@@ -24,6 +27,9 @@ public class AuthService {
     private final TokenService tokenService;
     private final EmailService emailService;
     private final String frontendUrl;
+
+    private static final String DUMMY_HASH = "$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquii.V37YoLW5I477x8p6";
+    private static final Logger LOG = Logger.getLogger(AuthService.class);
 
     @Inject
     public AuthService(PlayerRepository playerRepository,
@@ -38,10 +44,10 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email())) {
-            throw new BadRequestException("Email already in use");
+            throw new UserAlreadyExistsException("Email already in use");
         }
         if (playerRepository.existsByUsername(req.username())) {
-            throw new BadRequestException("Username already in use");
+            throw new UserAlreadyExistsException("Username already in use");
         }
 
         validatePassword(req.password());
@@ -61,19 +67,24 @@ public class AuthService {
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
 
+        LOG.info("AUDIT: New user registered: " + req.username() + " (" + req.email() + ")");
         return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
                 player.getBalance(), player.getAvatarUrl());
     }
 
     public AuthResponse login(LoginRequest req) {
         Player player = playerRepository.findByEmail(req.email());
+
         if (player == null) {
-            throw new NotAuthorizedException("Invalid credentials");
+            BCrypt.verifyer().verify(req.password().toCharArray(), DUMMY_HASH);
+            LOG.warn("AUDIT: Failed login attempt (user not found) for: " + req.email());
+            throw new AuthenticationFailedException("Invalid credentials");
         }
 
         BCrypt.Result result = BCrypt.verifyer().verify(req.password().toCharArray(), player.getPasswordHash());
         if (!result.verified) {
-            throw new NotAuthorizedException("Invalid credentials");
+            LOG.warn("AUDIT: Failed login attempt (invalid password) for: " + req.email());
+            throw new AuthenticationFailedException("Invalid credentials");
         }
 
         playerRepository.ensureIndices(player);
@@ -81,6 +92,7 @@ public class AuthService {
         String accessToken = tokenService.generateAccessToken(player.getEmail(), player.getUsername(), player.getId());
         String refreshToken = tokenService.generateRefreshToken();
         playerRepository.saveRefreshToken(refreshToken, player.getId());
+        LOG.info("AUDIT: Successful login: " + player.getUsername());
 
         return new AuthResponse(accessToken, refreshToken, player.getId(), player.getUsername(), player.getEmail(),
                 player.getBalance(), player.getAvatarUrl());
@@ -107,6 +119,12 @@ public class AuthService {
                 player.getBalance(), player.getAvatarUrl());
     }
 
+    public void logout(String refreshToken) {
+        if (refreshToken != null) {
+            playerRepository.deleteRefreshToken(refreshToken);
+        }
+    }
+
     public void changePassword(String userId, String oldPass, String newPass) {
         Player player = playerRepository.findById(userId);
         if (player == null) {
@@ -123,6 +141,8 @@ public class AuthService {
         String newHashed = BCrypt.withDefaults().hashToString(12, newPass.toCharArray());
         player.setPasswordHash(newHashed);
         playerRepository.save(player);
+        playerRepository.deleteAllTokensForUser(userId);
+        LOG.info("AUDIT: Password changed for user: " + userId);
     }
 
     public void updateEmail(String userId, String newEmail, String password) {
@@ -144,13 +164,14 @@ public class AuthService {
         }
 
         if (playerRepository.existsByEmail(newEmail)) {
-            throw new BadRequestException("Email already in use");
+            throw new UserAlreadyExistsException("Email already in use");
         }
 
         playerRepository.removeLookups(player.getEmail(), null);
 
         player.setEmail(newEmail);
         playerRepository.save(player);
+        LOG.info("AUDIT: Email updated for user: " + userId + " to " + newEmail);
     }
 
     public void updateAvatar(String userId, String avatarUrl) {
@@ -163,16 +184,21 @@ public class AuthService {
     }
 
     public void forgotPassword(ForgotPasswordRequest req) {
-        Player player = playerRepository.findByEmail(req.email());
-        if (player == null) {
-            return;
-        }
+        Thread.ofVirtual().start(() -> {
+            Player player = playerRepository.findByEmail(req.email());
 
-        String token = UUID.randomUUID().toString();
-        playerRepository.saveResetToken(token, player.getId());
+            if (player != null) {
+                if (playerRepository.isEmailRateLimited(req.email())) {
+                    return;
+                }
 
-        String resetLink = frontendUrl + "/reset-password?token=" + token;
-        emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+                String token = UUID.randomUUID().toString();
+                playerRepository.saveResetToken(token, player.getId());
+                String resetLink = frontendUrl + "/reset-password?token=" + token;
+                emailService.sendPasswordResetEmail(player.getEmail(), resetLink);
+                LOG.info("AUDIT: Password reset requested for: " + req.email());
+            }
+        });
     }
 
     public void resetPassword(ResetPasswordRequest req) {
@@ -193,6 +219,7 @@ public class AuthService {
         playerRepository.save(player);
 
         playerRepository.deleteResetToken(req.token());
+        LOG.info("AUDIT: Password reset completed for user: " + playerId);
     }
 
     private void validatePassword(String password) {
@@ -211,5 +238,9 @@ public class AuthService {
         if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?].*")) {
             throw new BadRequestException("Password must contain at least one special character");
         }
+    }
+
+    public Player findById(String id) {
+        return playerRepository.findById(id);
     }
 }

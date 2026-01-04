@@ -16,6 +16,8 @@ import io.quarkus.security.Authenticated;
 @Produces(MediaType.APPLICATION_JSON)
 public class BettingResource {
 
+    private static final org.jboss.logging.Logger LOG = org.jboss.logging.Logger.getLogger(BettingResource.class);
+
     private final BettingService bettingService;
     private final JsonWebToken jwt;
 
@@ -29,6 +31,7 @@ public class BettingResource {
         public double amount;
         public double autoCashout;
         public int index;
+        public String nonce;
     }
 
     @POST
@@ -44,13 +47,13 @@ public class BettingResource {
             }
 
             int betIndex = (req.index == 1) ? 1 : 0;
-            bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex);
+            bettingService.placeBet(userId, username, req.amount, req.autoCashout, betIndex, req.nonce);
             return Response.ok().build();
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(new ErrorResponse(e.getMessage())).build();
         } catch (Exception e) {
-            e.printStackTrace();
-            return Response.serverError().entity(new ErrorResponse("Errore interno: " + e.getMessage())).build();
+            LOG.error("Errore piazzamento scommessa", e);
+            return Response.serverError().entity(new ErrorResponse("Errore interno")).build();
         }
     }
 
