@@ -13,6 +13,9 @@ import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
+import io.github.bucket4j.Bandwidth;
+import io.github.bucket4j.Bucket;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -26,6 +29,7 @@ public class GameSocket {
     private static final Logger LOG = Logger.getLogger(GameSocket.class);
     private static final Set<WebSocketConnection> sessions = ConcurrentHashMap.newKeySet();
     private static final Map<String, UserInfo> connectedUsers = new ConcurrentHashMap<>();
+    private final Map<String, Bucket> rateLimiters = new ConcurrentHashMap<>();
     private final GameEngineService gameEngine;
     private final BettingService bettingService;
     private final JsonWebToken jwt;
@@ -47,6 +51,14 @@ public class GameSocket {
         if (username == null) {
             username = jwt.getName();
         }
+
+        Bucket bucket = Bucket.builder()
+                .addLimit(Bandwidth.builder()
+                        .capacity(5)
+                        .refillGreedy(5, Duration.ofSeconds(1))
+                        .build())
+                .build();
+        rateLimiters.put(connection.id(), bucket);
 
         connectedUsers.put(connection.id(), new UserInfo(userId, username));
         sessions.add(connection);
@@ -72,6 +84,7 @@ public class GameSocket {
     public void onClose(WebSocketConnection connection) {
         sessions.remove(connection);
         connectedUsers.remove(connection.id());
+        rateLimiters.remove(connection.id());
         LOG.info("Connessione chiusa: " + connection.id());
     }
 
@@ -81,6 +94,16 @@ public class GameSocket {
         if (userInfo == null) {
             connection.sendText("ERROR:Utente non autenticato")
                     .subscribe().with(v -> connection.close(), t -> {
+                    });
+            return;
+        }
+
+        Bucket bucket = rateLimiters.get(connection.id());
+        if (bucket != null && !bucket.tryConsume(1)) {
+            LOG.warn("Rate limit exceeded for connection: " + connection.id());
+            connection.sendText("ERROR:Rate limit exceeded. Slow down!")
+                    .subscribe().with(v -> {
+                    }, t -> {
                     });
             return;
         }
@@ -100,6 +123,13 @@ public class GameSocket {
 
                 String nonce = parts[1];
                 double amount = Double.parseDouble(parts[3]);
+
+                if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
+                    connection.sendText("ERROR:Importo scommessa non valido.")
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio errore validazione", t));
+                    return;
+                }
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
                 bettingService.placeBet(userId, username, amount, 0.0, index, nonce);
@@ -117,6 +147,11 @@ public class GameSocket {
                 connection.sendText("CASHOUT_OK")
                         .subscribe().with(v -> {
                         }, t -> LOG.error("Errore invio CASHOUT_OK", t));
+
+            } else if (message.equals("PING")) {
+                connection.sendText("PONG")
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio PONG", t));
             }
         } catch (Exception e) {
             LOG.error("Errore gestione messaggio: " + message, e);

@@ -81,27 +81,40 @@ public class BettingService {
         }
 
         String betKey = getBetKey(userId, index);
+        String txId = "bet:" + game.getId() + ":" + userId + ":" + index;
+        double finalAmount = round(amount);
+        boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
+        if (!success) {
+            throw new IllegalStateException("Saldo insufficiente.");
+        }
 
-        currentRoundBets.compute(betKey, (key, existingBet) -> {
-            if (existingBet != null) {
-                throw new IllegalStateException("Scommessa già presente.");
+        try {
+            getGameEngine().runInLock(() -> {
+                if (game.getStatus() != GameState.WAITING) {
+                    throw new IllegalStateException("ROUND_STARTED");
+                }
+
+                currentRoundBets.compute(betKey, (key, existingBet) -> {
+                    if (existingBet != null) {
+                        throw new IllegalStateException("Scommessa già presente.");
+                    }
+
+                    Player player = playerRepository.findById(userId);
+                    String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
+
+                    Bet bet = new Bet(userId, username, game.getId(), finalAmount, index, avatarUrl);
+                    bet.setAutoCashout(autoCashout);
+                    return bet;
+                });
+            });
+        } catch (Exception e) {
+            walletService.refundBet(userId, finalAmount, game.getId(), "refund:" + txId);
+
+            if ("ROUND_STARTED".equals(e.getMessage())) {
+                throw new IllegalStateException("Il round è già iniziato, scommessa annullata.");
             }
-
-            double finalAmount = round(amount);
-            String txId = "bet:" + game.getId() + ":" + userId + ":" + index;
-
-            boolean success = walletService.reserveFunds(userId, finalAmount, game.getId(), txId);
-            if (!success) {
-                throw new IllegalStateException("Saldo insufficiente.");
-            }
-
-            Player player = playerRepository.findById(userId);
-            String avatarUrl = (player != null) ? player.getAvatarUrl() : null;
-
-            Bet bet = new Bet(userId, username, game.getId(), finalAmount, index, avatarUrl);
-            bet.setAutoCashout(autoCashout);
-            return bet;
-        });
+            throw e;
+        }
 
         if (autoCashout > 1.00) {
             autoCashoutMap.computeIfAbsent(autoCashout, k -> new CopyOnWriteArrayList<>()).add(betKey);

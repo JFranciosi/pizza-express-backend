@@ -44,10 +44,10 @@ public class AuthService {
 
     public AuthResponse register(RegisterRequest req) {
         if (playerRepository.existsByEmail(req.email())) {
-            throw new UserAlreadyExistsException("Email already in use");
+            throw new UserAlreadyExistsException("Registration failed");
         }
         if (playerRepository.existsByUsername(req.username())) {
-            throw new UserAlreadyExistsException("Username already in use");
+            throw new UserAlreadyExistsException("Registration failed");
         }
 
         validatePassword(req.password());
