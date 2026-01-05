@@ -1,6 +1,7 @@
 package com.web.error;
 
 import com.web.model.ErrorResponse;
+import io.smallrye.jwt.auth.principal.ParseException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
@@ -13,13 +14,13 @@ public class GlobalExceptionMapper implements ExceptionMapper<Exception> {
     private static final Logger LOG = Logger.getLogger(GlobalExceptionMapper.class);
 
     public Response toResponse(Exception exception) {
-        if (exception instanceof com.web.error.UserAlreadyExistsException) {
+        if (exception instanceof UserAlreadyExistsException) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(new ErrorResponse("Registration failed"))
                     .build();
         }
 
-        if (exception instanceof com.web.error.AuthenticationFailedException || exception instanceof io.smallrye.jwt.auth.principal.ParseException) {
+        if (exception instanceof AuthenticationFailedException || exception instanceof ParseException) {
             return Response.status(Response.Status.UNAUTHORIZED)
                     .build();
         }
