@@ -167,6 +167,7 @@ public class GameEngineService {
         double currentMultiplier = bd.doubleValue();
 
         if (currentMultiplier >= currentGame.getCrashPoint()) {
+            bettingService.checkAutoCashouts(currentGame.getCrashPoint());
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
