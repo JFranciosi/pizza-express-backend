@@ -22,8 +22,8 @@ public class SecurityHeadersFilter implements ContainerResponseFilter {
 
         responseContext.getHeaders().add("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         String csp = "default-src 'self'; " +
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+                "script-src 'self'; " +
+                "style-src 'self' https://fonts.googleapis.com; " +
                 "img-src 'self' data: https:; " +
                 "font-src 'self' data: https: https://fonts.gstatic.com; " +
                 "connect-src 'self' https: wss:; " +
@@ -34,9 +34,6 @@ public class SecurityHeadersFilter implements ContainerResponseFilter {
         responseContext.getHeaders().add("X-Content-Type-Options", "nosniff");
         responseContext.getHeaders().add("Referrer-Policy", "strict-origin-when-cross-origin");
         responseContext.getHeaders().add("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
-
-        // Manual CORS patch removed to avoid "multiple values" error.
-        // Quarkus CORS filter in application.properties should handle it.
 
         if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
             if (!responseContext.getHeaders().containsKey("Access-Control-Allow-Headers")) {

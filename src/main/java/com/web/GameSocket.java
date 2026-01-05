@@ -123,6 +123,13 @@ public class GameSocket {
 
                 String nonce = parts[1];
                 double amount = Double.parseDouble(parts[3]);
+
+                if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
+                    connection.sendText("ERROR:Importo scommessa non valido.")
+                            .subscribe().with(v -> {
+                            }, t -> LOG.error("Errore invio errore validazione", t));
+                    return;
+                }
                 int index = (parts.length > 4) ? Integer.parseInt(parts[4]) : 0;
 
                 bettingService.placeBet(userId, username, amount, 0.0, index, nonce);
