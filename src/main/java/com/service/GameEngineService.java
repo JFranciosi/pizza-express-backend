@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 @ApplicationScoped
 public class GameEngineService {
@@ -29,6 +30,7 @@ public class GameEngineService {
     private Game currentGame;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private boolean startingNewRound = false;
+    private final ReentrantLock gameLock = new ReentrantLock();
 
     private static final long WAITING_TIME_MS = 10000;
     private static final double GROWTH_RATE = 0.00006;
@@ -105,8 +107,8 @@ public class GameEngineService {
             double crashPoint = provablyFairService.calculateCrashPoint(gameSeed);
 
             currentGame.setCrashPoint(crashPoint);
-            currentGame.setSecret(gameSeed); // The seed for THIS game is the hash from the chain
-            currentGame.setHash(provablyFairService.sha256(gameSeed)); // Hash of the seed for verification (if needed)
+            currentGame.setSecret(gameSeed);
+            currentGame.setHash(provablyFairService.sha256(gameSeed));
             currentGame.setStartTime(System.currentTimeMillis() + WAITING_TIME_MS);
 
             bettingService.resetBetsForNewRound();
@@ -128,14 +130,28 @@ public class GameEngineService {
     private long lastSecondsBroadcast = -1;
 
     private void startGame() {
-        currentGame.setStatus(GameState.FLYING);
-        roundStartTime = System.currentTimeMillis();
-        running.set(true);
-        saveGameToRedis();
-        LOG.info("Game Started! VESPA IN VOLO 🛵💨");
+        gameLock.lock();
+        try {
+            currentGame.setStatus(GameState.FLYING);
+            roundStartTime = System.currentTimeMillis();
+            running.set(true);
+            saveGameToRedis();
+            LOG.info("Game Started! VESPA IN VOLO 🛵💨");
 
-        gameSocket.broadcast("STATE:RUNNING");
-        gameSocket.broadcast("TAKEOFF");
+            gameSocket.broadcast("STATE:RUNNING");
+            gameSocket.broadcast("TAKEOFF");
+        } finally {
+            gameLock.unlock();
+        }
+    }
+
+    public void runInLock(Runnable action) {
+        gameLock.lock();
+        try {
+            action.run();
+        } finally {
+            gameLock.unlock();
+        }
     }
 
     private void updateMultiplier(long now) {
@@ -154,7 +170,7 @@ public class GameEngineService {
             crash(currentGame.getCrashPoint());
         } else {
             currentGame.setMultiplier(currentMultiplier);
-            bettingService.checkAutoCashouts(currentMultiplier); // Sync call
+            bettingService.checkAutoCashouts(currentMultiplier);
             gameSocket.broadcast("TICK:" + currentMultiplier);
         }
     }
