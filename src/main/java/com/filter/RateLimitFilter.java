@@ -24,20 +24,31 @@ public class RateLimitFilter implements ContainerRequestFilter {
             .expireAfterAccess(1, TimeUnit.HOURS)
             .build();
 
+    private final Cache<String, Bucket> loginBuckets = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterAccess(1, TimeUnit.HOURS)
+            .build();
+
     @Context
     HttpServerRequest request;
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
         if ("OPTIONS".equalsIgnoreCase(requestContext.getMethod())) {
-
+            return;
         }
         String ip = (request.remoteAddress() != null) ? request.remoteAddress().host() : null;
         
         if (ip == null || ip.isEmpty()) {
             ip = "unknown";
         }
-        Bucket bucket = buckets.get(ip, k -> createNewBucket());
+
+        Bucket bucket;
+        if (requestContext.getUriInfo().getPath().contains("/auth/login")) {
+             bucket = loginBuckets.get(ip, k -> createLoginBucket());
+        } else {
+             bucket = buckets.get(ip, k -> createNewBucket());
+        }
 
         if (!bucket.tryConsume(1)) {
             LOG.warn("Rate limit superato per IP: " + ip);
@@ -50,6 +61,14 @@ public class RateLimitFilter implements ContainerRequestFilter {
         Bandwidth limit = Bandwidth.builder()
                 .capacity(20)
                 .refillGreedy(20, Duration.ofSeconds(1))
+                .build();
+        return Bucket.builder().addLimit(limit).build();
+    }
+
+    private Bucket createLoginBucket() {
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(5)
+                .refillGreedy(5, Duration.ofMinutes(1))
                 .build();
         return Bucket.builder().addLimit(limit).build();
     }
