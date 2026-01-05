@@ -147,6 +147,11 @@ public class GameSocket {
                 connection.sendText("CASHOUT_OK")
                         .subscribe().with(v -> {
                         }, t -> LOG.error("Errore invio CASHOUT_OK", t));
+
+            } else if (message.equals("PING")) {
+                connection.sendText("PONG")
+                        .subscribe().with(v -> {
+                        }, t -> LOG.error("Errore invio PONG", t));
             }
         } catch (Exception e) {
             LOG.error("Errore gestione messaggio: " + message, e);
